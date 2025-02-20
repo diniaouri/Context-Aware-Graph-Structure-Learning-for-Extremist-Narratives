@@ -52,7 +52,7 @@ The repository includes set-ups for three experiments using Schema A1:
 
    ```
    python3 -m venv .venv
-   source .venv/bin/activate # On Windows use `venv\Scripts\activate`
+   source .venv/bin/activate # On Windows use `.venv\Scripts\activate`
    ```
 
    Install Dependencies:
