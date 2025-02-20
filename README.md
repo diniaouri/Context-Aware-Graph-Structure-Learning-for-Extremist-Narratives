@@ -8,20 +8,10 @@ This repository uses SUBLIME with custom datasets for analyzing tweets with anno
 - [Datasets](#datasets)
 - [Experiments](#experiments)
 - [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Contributing](#contributing)
-- [License](#license)
-- [Contact](#contact)
-- [Acknowledgements](#acknowledgements)
 
 ## Overview
 
 This project leverages the **SUBLIME** framework with custom datasets to perform tweet analysis focused on extremism and narrative features. The primary dataset consists of annotated tweets from 2024.
-
-_Additional background information about the project:_
-
-- _[Insert detailed project background and motivation here]_
 
 ## Datasets
 
@@ -53,40 +43,36 @@ The repository includes set-ups for three experiments using Schema A1:
 1. **Clone the Repository:**
 
    ```
-   git clone https://github.com/your-username/your-repo-name.git
-   cd your-repo-name
+   git clone https://github.com/T2WIN/projet_recherche_arenas.git
+   cd projet_recherche_arenas
    ```
 
-2. **Ensure the Required Datasets and Scripts are in Place**
-
-   Place 2024_08_SCHEMA_A1.xlsx into the designated datasets folder.
-   Check that arenas_si.sh is configured as described in the experiments section.
-
-3. **Installation**
+2. **Installation**
    Set Up Virtual Environment:
+
    ```
    python3 -m venv venv
    source venv/bin/activate # On Windows use `venv\Scripts\activate`
    ```
 
-Install Dependencies:
+   Install Dependencies:
 
-```
-pip install -r requirements.txt
-```
+   ```
+   pip install -r requirements.txt
+   ```
 
-4. **Run the Experiment Script**
+3. **Run the Experiment Script**
    Update the configuration in arenas_si.sh according to the desired experiment.
 
 ```
 ./arenas_si.sh
 ```
 
-5.  **Postprocessing and Analysis**:
+4.  **Postprocessing and Analysis**:
 
-    Use the provided analysis scripts to evaluate experiment results.
-    Example command:
+    Currently, analysis of results is based on changing the file name in graph_eval.py at the beginning of the **init**
+    To run the analysis :
 
     ```
-    python analyze_results.py --input results/experiment1_output.csv
+    python graph_eval.py
     ```

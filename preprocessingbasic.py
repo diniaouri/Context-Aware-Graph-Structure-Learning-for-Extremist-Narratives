@@ -22,9 +22,10 @@ class GraphDataset():
         #                     dangvantuan/french-document-embedding
         #                     almanach/camembertav2-base
         #                     sentence-transformers/all-MiniLM-L12-v2
+        # Just so I don't have to remember
         self.embeddings = self.calc_embeddings(
             "dangvantuan/french-document-embedding")
-        np.save("SCHEMA_A1_embeddings_exp2.npy", self.embeddings)
+        np.save("./embeddings/SCHEMA_A1_embeddings_exp2.npy", self.embeddings)
 
         self.embeddings = torch.from_numpy(self.embeddings)
         self.train_mask = []
@@ -74,6 +75,11 @@ class GraphDataset():
         return text
 
     def get_dataset(self):
+        """
+        This is the format that SUBLIME code expects but since we are not using node classification downstream task,
+        Labels and masks are empty.
+        We are only using the structure inference context so I provide an empty adjacency matrix
+        """
         return self.embeddings, self.embeddings.shape[1], self.labels, len(self.labels), self.train_mask, self.val_mask, self.test_mask, self.adjacency_matrix
 
 
