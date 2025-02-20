@@ -9,7 +9,7 @@ class GraphAnalysis():
 
     def __init__(self):
         # Load adjacency matrix from pickle file
-        with open('./adjacency_matrices/adjacency_learned_epoch_4000_exp3.pkl', 'rb') as f:
+        with open('./adjacency_matrices/adjacency_learned_epoch_1000_exp3.pkl', 'rb') as f:
             adj_matrix = pickle.load(f)
 
         # Load node features from dataframe (assuming CSV for example)
