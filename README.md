@@ -61,6 +61,8 @@ The repository includes set-ups for three experiments using Schema A1:
    pip install -r requirements.txt
    ```
 
+   Please note that the dgl (Deep Graph Library) install is a CPU install not GPU so you may encounter errors
+
 3. **Run the Experiment Script**
    Update the configuration in arenas_si.sh according to the desired experiment.
 
