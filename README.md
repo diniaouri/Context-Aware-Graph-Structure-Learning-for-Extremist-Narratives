@@ -51,7 +51,7 @@ The repository includes set-ups for three experiments using Schema A1:
    Set Up Virtual Environment:
 
    ```
-   python3 -m venv venv
+   python3 -m venv .venv
    source venv/bin/activate # On Windows use `venv\Scripts\activate`
    ```
 
