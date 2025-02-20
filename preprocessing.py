@@ -13,7 +13,7 @@ class GraphDataset():
 
     def __init__(self, adjacency_matrix_type="None", label_column="In-Group"):
         # Open dataset (stored as excel sheet) and remove useless rows / columns
-        self.data = pd.read_excel("2024_08_SCHEMA_A1.xlsx",
+        self.data = pd.read_excel("./datasets/2024_08_SCHEMA_A1.xlsx",
                                   header=4, usecols="B, AH:BA")
         self.data = self.data.dropna(subset=["Text"])
         self.label_column = label_column

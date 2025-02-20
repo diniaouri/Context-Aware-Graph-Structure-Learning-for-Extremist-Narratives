@@ -11,7 +11,7 @@ class GraphDataset():
 
     def __init__(self):
         # Open dataset (stored as excel sheet) and remove useless rows / columns
-        self.data = pd.read_excel("2024_08_SCHEMA_A1.xlsx",
+        self.data = pd.read_excel("./datasets/2024_08_SCHEMA_A1.xlsx",
                                   header=4, usecols="B, AH:BA")
         # Remove rows that don't have text or in group or out group
         self.data = self.data.dropna(subset=["Text", "In-Group", "Out-group"])

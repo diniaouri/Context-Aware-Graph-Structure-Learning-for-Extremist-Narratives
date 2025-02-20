@@ -15,6 +15,7 @@ from sklearn.cluster import KMeans
 import dgl
 import os
 import random
+from utils import save_loss_plot
 
 EOS = 1e-10
 
@@ -274,6 +275,8 @@ class Experiment:
                 best_val_test = 0
                 best_epoch = 0
 
+            loss_list = []
+
             for epoch in range(1, args.epochs + 1):
 
                 model.train()
@@ -302,6 +305,7 @@ class Experiment:
 
                 print("Epoch {:05d} | CL Loss {:.4f}".format(
                     epoch, loss.item()))
+                loss_list.append(loss.item())
 
                 if epoch % 200 == 0:
                     model.eval()
@@ -315,73 +319,7 @@ class Experiment:
                     os.makedirs("./adjacency_matrices", exist_ok=True)
                     with open(f'./adjacency_matrices/adjacency_learned_epoch_{epoch}_exp{args.exp_nb}.pkl', 'wb') as file:
                         pickle.dump(f_adj, file)
-                # if epoch % args.eval_freq == 0:
-
-                    # if args.downstream_task == 'classification':
-                    #     model.eval()
-                    #     graph_learner.eval()
-                    #     f_adj = Adj
-
-                    #     if args.sparse:
-                    #         f_adj.edata['w'] = f_adj.edata['w'].detach()
-                    #     else:
-                    #         f_adj = f_adj.detach()
-
-                    #     val_accu, test_accu, _, per_class_accu = self.evaluate_adj_by_cls(f_adj, features, nfeats, labels,
-                    #                                                                       nclasses, train_mask, val_mask, test_mask, args)
-
-                    #     if val_accu > best_val:
-                    #         best_val = val_accu
-                    #         best_val_test = test_accu
-                    #         best_val_per_class = per_class_accu
-                    #         best_epoch = epoch
-
-                    # elif args.downstream_task == 'clustering':
-                    #     model.eval()
-                    #     graph_learner.eval()
-                    #     _, embedding = model(features, Adj)
-                    #     embedding = embedding.cpu().detach().numpy()
-
-                    #     acc_mr, nmi_mr, f1_mr, ari_mr = [], [], [], []
-                    #     for clu_trial in range(n_clu_trials):
-                    #         kmeans = KMeans(
-                    #             n_clusters=nclasses, random_state=clu_trial).fit(embedding)
-                    #         predict_labels = kmeans.predict(embedding)
-                    #         cm_all = clustering_metrics(
-                    #             labels.cpu().numpy(), predict_labels)
-                    #         acc_, nmi_, f1_, ari_ = cm_all.evaluationClusterModelFromLabel(
-                    #             print_results=False)
-                    #         acc_mr.append(acc_)
-                    #         nmi_mr.append(nmi_)
-                    #         f1_mr.append(f1_)
-                    #         ari_mr.append(ari_)
-
-                    #     acc, nmi, f1, ari = np.mean(acc_mr), np.mean(
-                    #         nmi_mr), np.mean(f1_mr), np.mean(ari_mr)
-
-                    #     if args.downstream_task == 'classification':
-                    #         validation_accuracies.append(best_val.item())
-                    #         test_accuracies.append(best_val_test.item())
-                    #         print("Trial: ", trial + 1)
-                    #         print("Best val ACC: ", best_val.item())
-                    #         print("Best test ACC: ", best_val_test.item())
-                    #         print(f"Per class accuracies : {per_class_accu}")
-                    #     elif args.downstream_task == 'clustering':
-                    #         print("Final ACC: ", acc)
-                    #         print("Final NMI: ", nmi)
-                    #         print("Final F-score: ", f1)
-                    #         print("Final ARI: ", ari)
-
-                    # if args.downstream_task == 'classification' and trial != 0:
-                    #     self.print_results(validation_accuracies, test_accuracies)
-
-    def print_results(self, validation_accu, test_accu):
-        s_val = "Val accuracy: {:.4f} +/- {:.4f}".format(
-            np.mean(validation_accu), np.std(validation_accu))
-        s_test = "Test accuracy: {:.4f} +/- {:.4f}".format(
-            np.mean(test_accu), np.std(test_accu))
-        print(s_val)
-        print(s_test)
+            save_loss_plot(loss_list, args)
 
 
 if __name__ == '__main__':

@@ -6,7 +6,9 @@ from sklearn.neighbors import kneighbors_graph
 import dgl
 from sklearn import metrics
 from munkres import Munkres
-
+import matplotlib.pyplot as plt
+import os
+from datetime import datetime
 EOS = 1e-10
 
 
@@ -315,3 +317,30 @@ class clustering_metrics():
                   .format(precision_micro, recall_micro, nmi, adjscore))
 
         return acc, nmi, f1_macro, adjscore
+
+
+def save_loss_plot(loss_values, args):
+    # Create a new figure
+    plt.figure()
+
+    # Plot the loss values against the epochs
+    plt.plot(loss_values, marker='o')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Loss Evolution Over Epochs')
+
+    # Ensure the directory exists (you can customize the folder name if needed)
+    folder_path = 'plots'
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
+    # Get the current time formatted as 'YYYYMMDD_HHMMSS'
+    current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Create a file name that includes the time and the experiment number
+    file_name = f"loss_{current_time}_exp{args.exp_nb}.png"
+    file_path = os.path.join(folder_path, file_name)
+
+    # Save the plot to the designated file path without displaying it
+    plt.savefig(file_path)
+    plt.close()  # Close the figure to free memory
