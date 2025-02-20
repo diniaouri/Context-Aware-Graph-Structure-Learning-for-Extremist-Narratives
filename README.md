@@ -64,15 +64,15 @@ The repository includes set-ups for three experiments using Schema A1:
 3. **Run the Experiment Script**
    Update the configuration in arenas_si.sh according to the desired experiment.
 
-```
-./arenas_si.sh
-```
+   ```
+   source arenas_si.sh
+   ```
 
-4.  **Postprocessing and Analysis**:
+4. **Postprocessing and Analysis**:
 
-    Currently, analysis of results is based on changing the file name in graph_eval.py at the beginning of the **init**
-    To run the analysis :
+   Currently, analysis of results is based on changing the file name in graph_eval.py at the beginning of the init method.
+   To run the analysis :
 
-    ```
-    python graph_eval.py
-    ```
+   ```
+   python graph_eval.py
+   ```
