@@ -23,6 +23,7 @@ class GraphDataset():
         #                     almanach/camembertav2-base
         #                     sentence-transformers/all-MiniLM-L12-v2
         # Just so I don't have to remember
+        os.makedirs("./embeddings", exist_ok=True)
         self.embeddings = self.calc_embeddings(
             "dangvantuan/french-document-embedding")
         np.save("./embeddings/SCHEMA_A1_embeddings_exp2.npy", self.embeddings)

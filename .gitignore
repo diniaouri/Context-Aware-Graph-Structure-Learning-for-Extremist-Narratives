@@ -3,3 +3,4 @@ __pycache__/
 tmp_trainer/
 adjacency_matrices/
 embeddings/
+.venv/

@@ -13,7 +13,7 @@ from graph_learners import *
 from utils import *
 from sklearn.cluster import KMeans
 import dgl
-
+import os
 import random
 
 EOS = 1e-10
@@ -312,7 +312,7 @@ class Experiment:
                         f_adj.edata['w'] = f_adj.edata['w'].detach()
                     else:
                         f_adj = f_adj.detach()
-
+                    os.makedirs("./adjacency_matrices", exist_ok=True)
                     with open(f'./adjacency_matrices/adjacency_learned_epoch_{epoch}_exp{args.exp_nb}.pkl', 'wb') as file:
                         pickle.dump(f_adj, file)
                 # if epoch % args.eval_freq == 0:
