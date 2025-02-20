@@ -52,7 +52,7 @@ The repository includes set-ups for three experiments using Schema A1:
 
 1. **Clone the Repository:**
 
-   ```bash
+   ```
    git clone https://github.com/your-username/your-repo-name.git
    cd your-repo-name
    ```
@@ -62,102 +62,31 @@ The repository includes set-ups for three experiments using Schema A1:
    Place 2024_08_SCHEMA_A1.xlsx into the designated datasets folder.
    Check that arenas_si.sh is configured as described in the experiments section.
 
-3. **Run the Experiment Script**
-
-```bash
-chmod +x arenas_si.sh
-./arenas_si.sh
-```
-
-4. **Installation**
-
-   Prerequisites:
-   Python (version 3.8 or higher)
-   SUBLIME framework or repository
-   Necessary Python packages: pandas, numpy, etc. (see requirements.txt for complete list)
-
+3. **Installation**
    Set Up Virtual Environment:
-
-   ```bash
+   ```
    python3 -m venv venv
    source venv/bin/activate # On Windows use `venv\Scripts\activate`
    ```
 
 Install Dependencies:
-bash
 
-    pip install -r requirements.txt
+```
+pip install -r requirements.txt
+```
 
-Usage
+4. **Run the Experiment Script**
+   Update the configuration in arenas_si.sh according to the desired experiment.
 
-    Preprocessing:
-        Run preprocessing scripts to prepare the data.
-        Example command:
-        bash
+```
+./arenas_si.sh
+```
 
-    python preprocess.py --input datasets/2024_08_SCHEMA_A1.xlsx --output processed_data.csv
-
-Running Experiments:
-
-    Update the configuration in arenas_si.sh according to the desired experiment.
-    Execute the script:
-    bash
-
-    ./arenas_si.sh
-
-Postprocessing and Analysis:
+5.  **Postprocessing and Analysis**:
 
     Use the provided analysis scripts to evaluate experiment results.
     Example command:
-    bash
 
-        python analyze_results.py --input results/experiment1_output.csv
-
-Contributing
-
-Contributions are welcome! To contribute to this project, please follow these steps:
-
-    Fork the repository.
-    Create a new branch for your feature or bug fix:
-    bash
-
-git checkout -b feature/your-feature-name
-
-Commit your changes:
-bash
-
-git commit -am 'Add your feature'
-
-Push to your branch:
-bash
-
-    git push origin feature/your-feature-name
-
-    Open a pull request on GitHub.
-
-For major changes, please open an issue first to discuss what you would like to change. Make sure to update tests as appropriate.
-License
-
-This project is licensed under the MIT License.
-(Alternatively, update this section with your project's chosen license information.)
-Contact
-
-For any inquiries or feedback, please contact:
-
-    Name: Your Name
-    Email: your.email@example.com
-    LinkedIn/GitHub: Your Profile
-
-Acknowledgements
-
-    Thanks to the contributors of the SUBLIME framework.
-    Acknowledgement to researchers and institutions that supported the project.
-    Any other people or projects that helped or inspired you.
-
-```
-
-```
-
-```
-
-```
+    ```
+    python analyze_results.py --input results/experiment1_output.csv
+    ```
