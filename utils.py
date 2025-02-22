@@ -1,3 +1,7 @@
+import matplotlib.pyplot as plt
+import os
+from datetime import datetime
+import pandas as pd
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -6,9 +10,7 @@ from sklearn.neighbors import kneighbors_graph
 import dgl
 from sklearn import metrics
 from munkres import Munkres
-import matplotlib.pyplot as plt
-import os
-from datetime import datetime
+
 EOS = 1e-10
 
 
@@ -70,33 +72,7 @@ def get_feat_mask(features, mask_rate):
 
 def accuracy(preds, labels):
     pred_class = torch.max(preds, 1)[1]
-    per_class_accuracy(preds, labels)
     return torch.sum(torch.eq(pred_class, labels)).float() / labels.shape[0]
-
-
-def per_class_accuracy(predictions, labels):
-    """
-    Calculate per-class accuracy using vectorized operations
-
-    Args:
-        predictions: tensor of model predictions (N, num_classes) or (N,) if already argmaxed
-        labels: tensor of true labels (N,)
-
-    Returns:
-        Tensor of accuracies for each class
-    """
-    if predictions.dim() > 1:
-        predictions = predictions.argmax(dim=1)
-
-    num_classes = max(predictions.max(), labels.max()) + 1
-    # Create mask for each class
-    correct = predictions == labels
-    accuracies = torch.tensor([
-        correct[labels == i].float().mean() if (labels == i).any() else 0.0
-        for i in range(num_classes)
-    ])
-
-    return accuracies
 
 
 def nearest_neighbors(X, k, metric):
@@ -317,6 +293,45 @@ class clustering_metrics():
                   .format(precision_micro, recall_micro, nmi, adjscore))
 
         return acc, nmi, f1_macro, adjscore
+
+
+class ExperimentParameters:
+    """
+    A class that loads a CSV file and assigns the headers as instance attribute
+    names, with the values being from the exp_nb-th row of the CSV file.
+    """
+
+    def __init__(self, exp_nb: int) -> None:
+        """
+        Initialize the CSVRowLoader by loading the CSV file and assigning
+        attributes based on the headers and the values from the exp_nb-th row.
+
+        Args:
+            csv_file (str): The path to the CSV file.
+            exp_nb (int): The zero-based index of the row to use for attribute values.
+        """
+        # Load the CSV file into a DataFrame
+        df = pd.read_csv("experiment_params.csv",
+                         encoding="utf-16", header=0)
+
+        # Check if the specified row exists in the DataFrame
+        if exp_nb < 0 or exp_nb >= len(df):
+            raise IndexError(
+                f"Row {exp_nb} is out of range for the CSV file with {len(df)} rows.")
+
+        # Convert the exp_nb-th row to a dictionary
+        row_data = df.iloc[exp_nb-1].to_dict()
+
+        # Set each column header as an attribute with the corresponding value
+        for header, value in row_data.items():
+            setattr(self, header, value)
+
+    def __repr__(self) -> str:
+        """
+        Provides a string representation of the instance showing its attributes.
+        """
+        attrs = {k: v for k, v in self.__dict__.items()}
+        return f"{self.__class__.__name__}({attrs})"
 
 
 def save_loss_plot(loss_values, args):

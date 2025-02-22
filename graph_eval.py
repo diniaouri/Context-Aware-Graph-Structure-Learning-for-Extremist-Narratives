@@ -9,14 +9,14 @@ class GraphAnalysis():
 
     def __init__(self):
         # Load adjacency matrix from pickle file
-        with open('./adjacency_matrices/adjacency_learned_epoch_1000_exp3.pkl', 'rb') as f:
+        with open('./adjacency_matrices/adjacency_learned_epoch_1000_exp1.pkl', 'rb') as f:
             adj_matrix = pickle.load(f)
 
         # Load node features from dataframe (assuming CSV for example)
-        self.node_features = pd.read_excel("2024_08_SCHEMA_A1.xlsx",
+        self.node_features = pd.read_excel("./datasets/2024_08_SCHEMA_A1.xlsx",
                                            header=4, usecols="B, AH:BA")
         self.node_features = self.node_features.dropna(
-            subset=["Text", "In-Group", "Out-group"])
+            subset=["Text"])
         self.node_features = self.node_features.reset_index(drop=True)
 
         # Verify alignment between matrix and features

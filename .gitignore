@@ -4,3 +4,4 @@ tmp_trainer/
 adjacency_matrices/
 embeddings/
 .venv/
+plots/

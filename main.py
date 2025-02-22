@@ -1,21 +1,16 @@
 import argparse
 import copy
-from datetime import datetime
 import pickle
 import numpy as np
 import torch
 import torch.nn.functional as F
-import preprocessing
-import preprocessingbasic
-from data_loader import load_data
+from preprocessing import SchemaA1Dataset, FullFrenchTweetDataset, OldSchemaA1Dataset
 from model import GCN, GCL
-from graph_learners import *
-from utils import *
-from sklearn.cluster import KMeans
+from graph_learners import FGP_learner, ATT_learner, GNN_learner, MLP_learner
 import dgl
 import os
 import random
-from utils import save_loss_plot
+from utils import save_loss_plot, ExperimentParameters, accuracy, get_feat_mask, symmetrize, normalize, split_batch, torch_sparse_eye, torch_sparse_to_dgl_graph, dgl_graph_to_torch_sparse
 
 EOS = 1e-10
 
@@ -72,7 +67,7 @@ class Experiment:
         accu = self.per_class_accuracy(logp[mask], labels[mask])
         return accu
 
-    def loss_gcl(self, model, graph_learner, features, anchor_adj):
+    def loss_gcl(self, model, graph_learner, features, anchor_adj, args):
 
         # view 1: anchor graph
         if args.maskfeat_rate_anchor:
@@ -168,15 +163,17 @@ class Experiment:
             else "cpu"
         )
         if args.exp_nb == 1:
-            graph_dataset = preprocessing.GraphDataset(
-                adjacency_matrix_type="knn")
+            dataset = OldSchemaA1Dataset("2024_08_SCHEMA_A1.xlsx", args.exp_nb)
         elif args.exp_nb == 2 or args.exp_nb == 3:
-            graph_dataset = preprocessingbasic.GraphDataset()
+            dataset = SchemaA1Dataset("2024_08_SCHEMA_A1.xlsx", args.exp_nb)
+        elif args.exp_nb == 4:
+            dataset = FullFrenchTweetDataset(
+                "All_french_tweet_data_embeddings_exp4.npy", args.exp_nb)
 
         if args.gsl_mode == 'structure_refinement':
-            features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj_original = graph_dataset.get_dataset()
+            features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj_original = dataset.get_dataset()
         elif args.gsl_mode == 'structure_inference':
-            features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, _ = graph_dataset.get_dataset()
+            features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, _ = dataset.get_dataset()
         # print("---------------------Feature Matrix-------------------------------")
         # print(features)
         # print(features.shape)
@@ -283,7 +280,7 @@ class Experiment:
                 graph_learner.train()
 
                 loss, Adj = self.loss_gcl(
-                    model, graph_learner, features, anchor_adj)
+                    model, graph_learner, features, anchor_adj, args)
 
                 optimizer_cl.zero_grad()
                 optimizer_learner.zero_grad()
@@ -324,60 +321,10 @@ class Experiment:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    # Experimental setting
-    parser.add_argument('-dataset', type=str, default='cora',
-                        choices=['cora', 'citeseer', 'pubmed'])
-    parser.add_argument('-ntrials', type=int, default=5)
-    parser.add_argument('-sparse', type=int, default=0)
-    parser.add_argument('-gsl_mode', type=str, default="structure_inference",
-                        choices=['structure_inference', 'structure_refinement'])
-    parser.add_argument('-eval_freq', type=int, default=5)
-    parser.add_argument('-downstream_task', type=str, default='classification',
-                        choices=['classification', 'clustering'])
-    parser.add_argument('-exp_nb', type=int, default=-1)
-    parser.add_argument('-gpu', type=int, default=0)
+    parser.add_argument('-exp_nb', type=int)
+    cl_args = parser.parse_args()
 
-    # GCL Module - Framework
-    parser.add_argument('-epochs', type=int, default=1000)
-    parser.add_argument('-lr', type=float, default=0.01)
-    parser.add_argument('-w_decay', type=float, default=0.0)
-    parser.add_argument('-hidden_dim', type=int, default=512)
-    parser.add_argument('-rep_dim', type=int, default=64)
-    parser.add_argument('-proj_dim', type=int, default=64)
-    parser.add_argument('-dropout', type=float, default=0.5)
-    parser.add_argument('-contrast_batch_size', type=int, default=0)
-    parser.add_argument('-nlayers', type=int, default=2)
-
-    # GCL Module -Augmentation
-    parser.add_argument('-maskfeat_rate_learner', type=float, default=0.2)
-    parser.add_argument('-maskfeat_rate_anchor', type=float, default=0.2)
-    parser.add_argument('-dropedge_rate', type=float, default=0.5)
-
-    # GSL Module
-    parser.add_argument('-type_learner', type=str,
-                        default='fgp', choices=["fgp", "att", "mlp", "gnn"])
-    parser.add_argument('-k', type=int, default=30)
-    parser.add_argument('-sim_function', type=str,
-                        default='cosine', choices=['cosine', 'minkowski'])
-    parser.add_argument('-gamma', type=float, default=0.9)
-    parser.add_argument('-activation_learner', type=str,
-                        default='relu', choices=["relu", "tanh"])
-
-    # Evaluation Network (Classification)
-    parser.add_argument('-epochs_cls', type=int, default=500)
-    parser.add_argument('-lr_cls', type=float, default=0.001)
-    parser.add_argument('-w_decay_cls', type=float, default=0.0005)
-    parser.add_argument('-hidden_dim_cls', type=int, default=32)
-    parser.add_argument('-dropout_cls', type=float, default=0.5)
-    parser.add_argument('-dropedge_cls', type=float, default=0.25)
-    parser.add_argument('-nlayers_cls', type=int, default=2)
-    parser.add_argument('-patience_cls', type=int, default=10)
-
-    # Structure Bootstrapping
-    parser.add_argument('-tau', type=float, default=1)
-    parser.add_argument('-c', type=int, default=0)
-
-    args = parser.parse_args()
-
+    experiment_params = ExperimentParameters(cl_args.exp_nb)
+    print(experiment_params.type_learner)
     experiment = Experiment()
-    experiment.train(args)
+    experiment.train(experiment_params)
