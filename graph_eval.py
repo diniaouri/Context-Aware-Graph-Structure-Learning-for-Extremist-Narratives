@@ -3,18 +3,19 @@ import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
+from preprocessing import FullFrenchTweetDataset, SchemaA1Dataset
 
 
 class GraphAnalysis():
 
     def __init__(self):
         # Load adjacency matrix from pickle file
-        with open('./adjacency_matrices/adjacency_learned_epoch_1000_exp1.pkl', 'rb') as f:
+        with open('./adjacency_matrices/adjacency_learned_epoch_1000_exp3.pkl', 'rb') as f:
             adj_matrix = pickle.load(f)
 
+        self.dataset = SchemaA1Dataset(experiment_nb=3)
         # Load node features from dataframe (assuming CSV for example)
-        self.node_features = pd.read_excel("./datasets/2024_08_SCHEMA_A1.xlsx",
-                                           header=4, usecols="B, AH:BA")
+        self.node_features = self.dataset.data
         self.node_features = self.node_features.dropna(
             subset=["Text"])
         self.node_features = self.node_features.reset_index(drop=True)
@@ -206,6 +207,29 @@ class GraphAnalysis():
                 print(f"  {in_group}/{out_group}: {ratio:.2%}")
             print("\n" + "="*60 + "\n")
 
+    def calculate_katz_centrality(self, threshold, alpha=0.1, beta=1.0, tol=1e-6, max_iter=1000):
+        """
+        Calculate the Katz centrality for all nodes in the graph G.
+
+        Parameters:
+            G (networkx.Graph): A NetworkX graph.
+            alpha (float): Attenuation factor. Must be less than the reciprocal of the largest eigenvalue of the adjacency matrix.
+            beta (float): Initial centrality value. Can be a constant or a dictionary mapping nodes to values.
+            tol (float): Tolerance for convergence in power iteration.
+            max_iter (int): Maximum number of iterations to perform.
+
+        Returns:
+            dict: A dictionary mapping each node to its Katz centrality value.
+        """
+        G = self.create_nx_graph(threshold)
+        try:
+            centrality = nx.katz_centrality(
+                G, alpha=alpha, beta=beta, tol=tol, max_iter=max_iter)
+        except nx.NetworkXException as e:
+            print(f"An error occurred: {e}")
+            centrality = {}
+        return centrality
+
 
 def main():
 
@@ -217,7 +241,8 @@ def main():
     analysis.plot_connected_components(threshold=0.115)
     ratio_results = analysis.calculate_component_group_ratios(0.115)
     analysis.display_group_ratios(ratio_results)
-    analysis.retrieve_nodes_of_connected_comp(38, 0.115)
+    # analysis.retrieve_nodes_of_connected_comp(38, 0.115)
+    # analysis.calculate_katz_centrality()
 
 
 main()

@@ -21,7 +21,7 @@ class PreprocessedDataset(ABC):
     Abstract base class for preprocessing datasets and computing embeddings.
     """
 
-    def __init__(self, dataset_file_name: str, experiment_nb: int) -> None:
+    def __init__(self, experiment_nb: int) -> None:
         """
         Initialize the dataset by cleaning it up and computing embeddings.
 
@@ -29,7 +29,6 @@ class PreprocessedDataset(ABC):
             dataset_file_name (str): The name of the dataset file.
             experiment_nb (int): The experiment number identifier.
         """
-        self.dataset_name: str = remove_file_extension(dataset_file_name)
         self.experiment: int = experiment_nb
 
         self.data: pd.DataFrame = self.clean_up_dataset()
@@ -38,9 +37,10 @@ class PreprocessedDataset(ABC):
         #                     almanach/camembertav2-base
         #                     sentence-transformers/all-MiniLM-L12-v2
         # Just so I don't have to remember
-        self.embeddings: np.ndarray = self.calc_embeddings_if_not_already(
+        self.calc_embeddings_if_not_already(
             "dangvantuan/french-document-embedding")
-        self.save_embeddings()
+        print("Embeddings are loaded")
+
         self.embeddings = torch.from_numpy(self.embeddings)
         self.train_mask: List[Any] = []
         self.val_mask: List[Any] = []
@@ -69,9 +69,11 @@ class PreprocessedDataset(ABC):
         """
         print()
         if not os.path.exists(f"./embeddings/{self.dataset_name}_embeddings_exp{self.experiment}.npy"):
-            return self.calc_embeddings(model_name)
+            self.embeddings = self.calc_embeddings(model_name)
+            self.save_embeddings()
         else:
-            return np.load(f"./embeddings/{self.dataset_name}_embeddings_exp{self.experiment}.npy")
+            self.embeddings = np.load(
+                f"./embeddings/{self.dataset_name}_embeddings_exp{self.experiment}.npy")
 
     def calc_embeddings(self, model_name: str) -> np.ndarray:
         """
@@ -195,15 +197,15 @@ class FullFrenchTweetDataset(PreprocessedDataset):
     Concrete implementation of PreprocessedDataset for French tweet data.
     """
 
-    def __init__(self, dataset_file_name: str, experiment_nb: int) -> None:
+    def __init__(self, experiment_nb: int) -> None:
         """
         Initialize the FullFrenchTweetDataset.
 
         Args:
-            dataset_file_name (str): The name of the dataset file.
             experiment_nb (int): The experiment number.
         """
-        super().__init__(dataset_file_name, experiment_nb)
+        self.dataset_name: str = "All_french_tweet_data"
+        super().__init__(experiment_nb)
 
     def clean_up_dataset(self) -> pd.DataFrame:
         """
@@ -227,8 +229,8 @@ class FullFrenchTweetDataset(PreprocessedDataset):
         # Remove retweets (posts that start with "RT")
         df = df[~df["Text"].str.startswith("RT", na=False)].copy()
 
-        # Randomly sample 3000 tweets from approximately 30000 tweets
-        df = df.sample(n=100, random_state=42)
+        # Randomly sample n < 30000 tweets from approximately 30000 tweets to make experiments faster.
+        df = df.sample(n=10000, random_state=42)
         df = df.reset_index(drop=True)
 
         df["Text"] = df["Text"].apply(clean_up_text)
@@ -242,7 +244,7 @@ class SchemaA1Dataset(PreprocessedDataset):
     Concrete implementation of PreprocessedDataset for SCHEMA A1.
     """
 
-    def __init__(self, dataset_file_name: str, experiment_nb: int) -> None:
+    def __init__(self, experiment_nb: int) -> None:
         """
         Initialize the class.
 
@@ -250,7 +252,8 @@ class SchemaA1Dataset(PreprocessedDataset):
             dataset_file_name (str): The name of the dataset file.
             experiment_nb (int): The experiment number.
         """
-        super().__init__(dataset_file_name, experiment_nb)
+        self.dataset_name: str = "2024_08_SCHEMA_A1"
+        super().__init__(experiment_nb)
 
     def clean_up_dataset(self) -> pd.DataFrame:
         """
@@ -278,7 +281,7 @@ class OldSchemaA1Dataset(PreprocessedDataset):
     Concrete implementation of PreprocessedDataset for SCHEMA A1.
     """
 
-    def __init__(self, dataset_file_name: str, experiment_nb: int) -> None:
+    def __init__(self, experiment_nb: int) -> None:
         """
         Initialize the class.
 
@@ -286,7 +289,8 @@ class OldSchemaA1Dataset(PreprocessedDataset):
             dataset_file_name (str): The name of the dataset file.
             experiment_nb (int): The experiment number.
         """
-        super().__init__(dataset_file_name, experiment_nb)
+        self.dataset_name: str = "2024_08_SCHEMA_A1"
+        super().__init__(experiment_nb)
 
     def clean_up_dataset(self) -> pd.DataFrame:
         """
@@ -308,6 +312,6 @@ class OldSchemaA1Dataset(PreprocessedDataset):
 
 
 if __name__ == "__main__":
-    first_dataset = SchemaA1Dataset("2024_08_SCHEMA_A1.xlsx", 2)
+    first_dataset = FullFrenchTweetDataset(4)
     features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj = first_dataset.get_dataset()
     print(first_dataset.data)

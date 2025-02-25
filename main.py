@@ -163,12 +163,11 @@ class Experiment:
             else "cpu"
         )
         if args.exp_nb == 1:
-            dataset = OldSchemaA1Dataset("2024_08_SCHEMA_A1.xlsx", args.exp_nb)
+            dataset = OldSchemaA1Dataset(args.exp_nb)
         elif args.exp_nb == 2 or args.exp_nb == 3:
-            dataset = SchemaA1Dataset("2024_08_SCHEMA_A1.xlsx", args.exp_nb)
+            dataset = SchemaA1Dataset(args.exp_nb)
         elif args.exp_nb == 4:
-            dataset = FullFrenchTweetDataset(
-                "All_french_tweet_data_embeddings_exp4.npy", args.exp_nb)
+            dataset = FullFrenchTweetDataset(args.exp_nb)
 
         if args.gsl_mode == 'structure_refinement':
             features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj_original = dataset.get_dataset()
