@@ -1,6 +1,5 @@
 torch==2.4.0
---find-links https://data.dgl.ai/wheels/torch-2.4/repo.html
-dgl==2.4.0
+dgl==2.0.0
 emoji
 numpy
 pandas
