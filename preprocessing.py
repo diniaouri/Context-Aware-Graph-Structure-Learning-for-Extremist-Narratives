@@ -137,46 +137,45 @@ class PreprocessedDataset(ABC):
         """
         pass
 
+    def clean_up_text(self, text: str) -> str:
+        """
+        Clean up the input text by performing several operations:
+        - Remove URLs
+        - Convert emojis to text
+        - Remove @mentions
+        - Remove hashtag symbols but keep the text
+        - Remove RT (retweet) indicators
+        - Remove multiple spaces and trim
+        - Convert to lowercase
 
-def clean_up_text(text: str) -> str:
-    """
-    Clean up the input text by performing several operations:
-    - Remove URLs
-    - Convert emojis to text
-    - Remove @mentions
-    - Remove hashtag symbols but keep the text
-    - Remove RT (retweet) indicators
-    - Remove multiple spaces and trim
-    - Convert to lowercase
+        Args:
+            text (str): The text string to clean.
 
-    Args:
-        text (str): The text string to clean.
+        Returns:
+            str: The cleaned text string.
+        """
+        # Remove URLs
+        text = re.sub(r'http\S+|www\S+|https\S+', '', text)
 
-    Returns:
-        str: The cleaned text string.
-    """
-    # Remove URLs
-    text = re.sub(r'http\S+|www\S+|https\S+', '', text)
+        # Convert emojis to their textual representation
+        text = emoji.demojize(text)
 
-    # Convert emojis to their textual representation
-    text = emoji.demojize(text)
+        # Remove @mention
+        text = re.sub(r'@\w+', '', text)
 
-    # Remove @mentions
-    text = re.sub(r'@\w+', '', text)
+        # Remove hashtag symbol but keep the text
+        text = re.sub(r'#(\w+)', r'\1', text)
 
-    # Remove hashtag symbol but keep the text
-    text = re.sub(r'#(\w+)', r'\1', text)
+        # Remove RT (retweet) indicator
+        text = re.sub(r'^RT[\s]+', '', text)
 
-    # Remove RT (retweet) indicator
-    text = re.sub(r'^RT[\s]+', '', text)
+        # Remove multiple spaces
+        text = re.sub(r'\s+', ' ', text)
 
-    # Remove multiple spaces
-    text = re.sub(r'\s+', ' ', text)
+        # Remove leading/trailing spaces and convert to lowercase
+        text = text.strip().lower()
 
-    # Remove leading/trailing spaces and convert to lowercase
-    text = text.strip().lower()
-
-    return text
+        return text
 
 
 def remove_file_extension(filename: str) -> str:
@@ -206,6 +205,48 @@ class FullFrenchTweetDataset(PreprocessedDataset):
         """
         self.dataset_name: str = "All_french_tweet_data"
         super().__init__(experiment_nb)
+        # self.calc_mix_of_features_embeddings_if_not_already()
+
+    def calc_mix_of_features_embeddings_if_not_already(self):
+        """Only calculate embeddings if not already calculated
+
+        Args:
+            model_name (str): The name of the SentenceTransformer model to use.
+
+        Returns:
+            np.ndarray: The calculated embeddings as a NumPy array.
+        """
+        if not os.path.exists(f"./embeddings/{self.dataset_name}_mixed_features_embeddings_exp{self.experiment}.npy"):
+            self.mixed_features_embeddings = self.calc_mix_of_features_embeddings()
+        else:
+            self.mixed_features_embeddings = np.load(
+                f"./embeddings/{self.dataset_name}_mixed_features_embeddings_exp{self.experiment}.npy")
+
+    def calc_mix_of_features_embeddings(self):
+        """
+        Calculate embeddings for the cleaned dataset using the specified model.
+
+        Args:
+            model_name (str): The name of the SentenceTransformer model to use.
+
+        Returns:
+            np.ndarray: The calculated embeddings as a NumPy array.
+        """
+        # Initialize the model with remote code trust enabled.
+        model = SentenceTransformer(
+            "dangvantuan/french-document-embedding", trust_remote_code=True)
+
+        # Create embeddings from the 'Text' column.
+        embeddings: np.ndarray = model.encode(
+            self.data["Mixed features"].tolist(),
+            batch_size=1,
+            show_progress_bar=True,
+            convert_to_numpy=True
+        )
+        np.save(
+            f"./embeddings/{self.dataset_name}_mixed_features_embeddings_exp{self.experiment}.npy",
+            embeddings
+        )
 
     def clean_up_dataset(self) -> pd.DataFrame:
         """
@@ -222,21 +263,53 @@ class FullFrenchTweetDataset(PreprocessedDataset):
         """
         # Load dataset from CSV
         df: pd.DataFrame = pd.read_csv("datasets/All_french_tweet_data.csv")
+        df = df[["Tweet, Text", "User, name", "User, Description"]]
 
-        df = df[["Tweet, Text", "User, name"]]
         df = df.rename(columns={"Tweet, Text": "Text", "User, name": "User"})
-
+        df["Mixed features"] = df["Text"] + \
+            df["User"] + df["User, Description"]
         # Remove retweets (posts that start with "RT")
         df = df[~df["Text"].str.startswith("RT", na=False)].copy()
 
         # Randomly sample n < 30000 tweets from approximately 30000 tweets to make experiments faster.
         df = df.sample(n=10000, random_state=42)
         df = df.reset_index(drop=True)
-
-        df["Text"] = df["Text"].apply(clean_up_text)
-
+        df["Text"] = df["Text"].apply(self.clean_up_text, args=(True,))
+        df["Mixed features"] = df["Mixed features"].apply(
+            self.clean_up_text, args=(False,))
         df.to_csv("ty.csv", index=False)
         return df
+
+    def clean_up_text(self, text: str, remove_mentions=True) -> str:
+
+        if not isinstance(text, str):
+            return "Erreur"
+        # Remove URLs
+        text = re.sub(r'http\S+|www\S+|https\S+', '', text)
+
+        # Convert emojis to their textual representation
+        text = emoji.demojize(text)
+
+        if remove_mentions:
+            # Remove @mention
+            text = re.sub(r'@\w+', '', text)
+        else:
+            # Remove @ symbol but keep mentions text
+            text = re.sub(r'@(\w+)', '', text)
+
+        # Remove hashtag symbol but keep the text
+        text = re.sub(r'#(\w+)', r'\1', text)
+
+        # Remove RT (retweet) indicator
+        text = re.sub(r'^RT[\s]+', '', text)
+
+        # Remove multiple spaces
+        text = re.sub(r'\s+', ' ', text)
+
+        # Remove leading/trailing spaces and convert to lowercase
+        text = text.strip().lower()
+
+        return text
 
 
 class SchemaA1Dataset(PreprocessedDataset):
@@ -271,7 +344,7 @@ class SchemaA1Dataset(PreprocessedDataset):
         # Remove rows that don't have text or in group or out group
         df = df.dropna(subset=["Text", "In-Group", "Out-group"])
         df = df.reset_index(drop=True)
-        df["Text"] = df["Text"].apply(clean_up_text)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
         df.to_csv("ty.csv")
         return df
 
@@ -307,11 +380,27 @@ class OldSchemaA1Dataset(PreprocessedDataset):
                            header=4, usecols="B, AH:BA")
         df = df.dropna(subset=["Text"])
         df = df.reset_index()
-        df["Text"] = df["Text"].apply(clean_up_text)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
+        return df
+
+
+class SelectedDataset(PreprocessedDataset):
+
+    def __init__(self, experiment_nb):
+        self.dataset_name = "300*3Tweets_ARENAS"
+        super().__init__(experiment_nb)
+
+    def clean_up_dataset(self):
+        df1 = pd.read_csv("datasets/300Tweets_ARENAS_Gender.csv")
+        df2 = pd.read_csv("datasets/300Tweets_ARENAS_Nation.csv")
+        df3 = pd.read_csv("datasets/300Tweets_ARENAS_Science.csv")
+        df = pd.concat([df1, df2, df3], axis=0)
+        df = df.reset_index(drop=True)
+        df = df.rename(columns={"Document": "Text"})
         return df
 
 
 if __name__ == "__main__":
-    first_dataset = FullFrenchTweetDataset(4)
+    first_dataset = SelectedDataset(5)
     features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj = first_dataset.get_dataset()
     print(first_dataset.data)

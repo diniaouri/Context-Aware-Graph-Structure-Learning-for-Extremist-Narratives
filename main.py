@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import torch
 import torch.nn.functional as F
-from preprocessing import SchemaA1Dataset, FullFrenchTweetDataset, OldSchemaA1Dataset
+from preprocessing import SchemaA1Dataset, FullFrenchTweetDataset, OldSchemaA1Dataset, SelectedDataset
 from model import GCN, GCL
 from graph_learners import FGP_learner, ATT_learner, GNN_learner, MLP_learner
 import dgl
@@ -168,6 +168,10 @@ class Experiment:
             dataset = SchemaA1Dataset(args.exp_nb)
         elif args.exp_nb == 4:
             dataset = FullFrenchTweetDataset(args.exp_nb)
+        elif args.exp_nb == 5:
+            dataset = SelectedDataset(args.exp_nb)
+        elif args.exp_nb == 6:
+            dataset = SchemaA1Dataset(args.exp_nb)
 
         if args.gsl_mode == 'structure_refinement':
             features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj_original = dataset.get_dataset()

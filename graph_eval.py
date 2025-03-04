@@ -66,6 +66,19 @@ class GraphAnalysis():
                 graph, feature_name)
         return feature_homophily
 
+    def compute_edge_homophily_index(G, feature):
+        same_group_edges = 0
+        total_edges = G.number_of_edges()
+        if total_edges == 0:
+            return 0  # Avoid division by zero if there are no edges
+
+        for u, v in G.edges():
+            if G.nodes[u].get(feature) == G.nodes[v].get(feature):
+                same_group_edges += 1
+
+        homophily_index = same_group_edges / total_edges
+        return homophily_index
+
     def analysis_of_threshold_on_homophily(self, thresholds):
         # Initialize dictionary to store results
         homophily_results = {feature: []
@@ -234,10 +247,10 @@ class GraphAnalysis():
 def main():
 
     analysis = GraphAnalysis()
-    # thresholds = np.linspace(0.00001, 0.5, 400)
-    # analysis.plot_nb_edges_variation(thresholds)
-    # analysis.plot_connected_components_evolution(thresholds)
-    # analysis.plot_homophily_variation("Topic", thresholds)
+    thresholds = np.linspace(0.00001, 0.5, 400)
+    analysis.plot_nb_edges_variation(thresholds)
+    analysis.plot_connected_components_evolution(thresholds)
+    analysis.plot_homophily_variation("Topic", thresholds)
     analysis.plot_connected_components(threshold=0.115)
     ratio_results = analysis.calculate_component_group_ratios(0.115)
     analysis.display_group_ratios(ratio_results)
