@@ -116,3 +116,7 @@ docker build -t projet_recherche_arenas .
 ```bash
 docker run -it projet_recherche_arenas # + experiment number (-exp_nb 1 ...)
 ```
+
+## Presentation
+
+https://docs.google.com/presentation/d/1-x08BoN2pvqaBrN1R_wAmzSJ4UV5NYGVvJUmaMGe7Gg/edit?usp=sharing
