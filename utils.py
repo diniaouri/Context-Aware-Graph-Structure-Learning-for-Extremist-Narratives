@@ -150,7 +150,7 @@ def cal_similarity_graph(node_embeddings):
 def top_k(raw_graph, K):
     values, indices = raw_graph.topk(k=int(K), dim=-1)
     assert torch.max(indices) < raw_graph.shape[1]
-    mask = torch.zeros(raw_graph.shape).cuda()
+    mask = torch.zeros(raw_graph.shape)
     mask[torch.arange(raw_graph.shape[0]).view(-1, 1), indices] = 1.
 
     mask.requires_grad = False
@@ -161,11 +161,11 @@ def top_k(raw_graph, K):
 def knn_fast(X, k, b):
     X = F.normalize(X, dim=1, p=2)
     index = 0
-    values = torch.zeros(X.shape[0] * (k + 1)).cuda()
-    rows = torch.zeros(X.shape[0] * (k + 1)).cuda()
-    cols = torch.zeros(X.shape[0] * (k + 1)).cuda()
-    norm_row = torch.zeros(X.shape[0]).cuda()
-    norm_col = torch.zeros(X.shape[0]).cuda()
+    values = torch.zeros(X.shape[0] * (k + 1))
+    rows = torch.zeros(X.shape[0] * (k + 1))
+    cols = torch.zeros(X.shape[0] * (k + 1))
+    norm_row = torch.zeros(X.shape[0])
+    norm_col = torch.zeros(X.shape[0])
     while index < X.shape[0]:
         if (index + b) > (X.shape[0]):
             end = X.shape[0]

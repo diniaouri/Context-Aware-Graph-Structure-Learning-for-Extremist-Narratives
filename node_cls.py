@@ -78,7 +78,7 @@ graph.ndata['label'] = labels_tensor
 n_nodes = graph.num_nodes()
 all_indices = np.arange(n_nodes)
 np.random.shuffle(all_indices)
-train_size = int(0.8 * n_nodes)
+train_size = int(0.4 * n_nodes)
 train_idx = all_indices[:train_size]
 test_idx = all_indices[train_size:]
 
@@ -91,7 +91,7 @@ graph.ndata['train_mask'] = train_mask
 graph.ndata['test_mask'] = test_mask
 
 # -------------------------------
-# 3. Build a GCN Model
+# 3. Build a GNN Model
 # -------------------------------
 
 
@@ -99,18 +99,34 @@ class GCN(nn.Module):
     def __init__(self, in_feats, hidden_feats, num_classes):
         super(GCN, self).__init__()
         self.layer1 = GraphConv(in_feats, hidden_feats)
-        self.layer2 = SAGEConv(hidden_feats, hidden_feats)
-        self.layer3 = GraphConv(hidden_feats, num_classes)
+        self.layer2 = GraphConv(hidden_feats, num_classes)
 
     def forward(self, graph, features):
         # First graph convolution layer with non-linear activation.
         x = self.layer1(graph, features)
         x = F.relu(x)
-        x = self.layer2(graph, x)
-        x = F.relu(x)
         # Second graph convolution layer outputs the logits.
-        x = self.layer3(graph, x)
+        x = self.layer2(graph, x)
         return x
+
+
+class GraphSAGE(nn.Module):
+    def __init__(self, in_feats, hidden_feats, num_classes, aggregator_type='mean', dropout=0.5):
+        super(GraphSAGE, self).__init__()
+        # First GraphSAGE layer.
+        self.sage1 = SAGEConv(in_feats, hidden_feats, aggregator_type)
+        # Second GraphSAGE layer outputs logits for each class.
+        self.sage2 = SAGEConv(hidden_feats, num_classes, aggregator_type)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, graph, features):
+        # Apply first layer and then a ReLU activation.
+        h = self.sage1(graph, features)
+        h = F.relu(h)
+        h = self.dropout(h)
+        # Second layer to produce class logits.
+        h = self.sage2(graph, h)
+        return h
 
 
 # Hyperparameters
@@ -121,8 +137,8 @@ learning_rate = 0.01
 num_epochs = 1000
 
 # Create the model, loss function, and optimizer.
-model = GCN(in_feats=in_feats, hidden_feats=hidden_feats,
-            num_classes=num_classes)
+model = GraphSAGE(in_feats=in_feats, hidden_feats=hidden_feats,
+                  num_classes=num_classes)
 loss_fn = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 

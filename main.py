@@ -164,14 +164,12 @@ class Experiment:
         )
         if args.exp_nb == 1:
             dataset = OldSchemaA1Dataset(args.exp_nb)
-        elif args.exp_nb == 2 or args.exp_nb == 3:
+        elif args.exp_nb in [2, 3, 6]:
             dataset = SchemaA1Dataset(args.exp_nb)
         elif args.exp_nb == 4:
             dataset = FullFrenchTweetDataset(args.exp_nb)
         elif args.exp_nb == 5:
             dataset = SelectedDataset(args.exp_nb)
-        elif args.exp_nb == 6:
-            dataset = SchemaA1Dataset(args.exp_nb)
 
         if args.gsl_mode == 'structure_refinement':
             features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj_original = dataset.get_dataset()

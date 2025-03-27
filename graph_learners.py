@@ -1,7 +1,7 @@
 import dgl
 import torch
 import torch.nn as nn
-
+import pickle
 from layers import Attentive, GCNConv_dense, GCNConv_dgl
 from utils import *
 
@@ -59,7 +59,8 @@ class ATT_learner(nn.Module):
             cols_ = torch.cat((cols, rows))
             values_ = torch.cat((values, values))
             values_ = apply_non_linearity(values_, self.non_linearity, self.i)
-            adj = dgl.graph((rows_, cols_), num_nodes=features.shape[0], device='cuda')
+            adj = dgl.graph(
+                (rows_, cols_), num_nodes=features.shape[0], device='cuda')
             adj.edata['w'] = values_
             return adj
         else:
@@ -67,7 +68,8 @@ class ATT_learner(nn.Module):
             embeddings = F.normalize(embeddings, dim=1, p=2)
             similarities = cal_similarity_graph(embeddings)
             similarities = top_k(similarities, self.k + 1)
-            similarities = apply_non_linearity(similarities, self.non_linearity, self.i)
+            similarities = apply_non_linearity(
+                similarities, self.non_linearity, self.i)
             return similarities
 
 
@@ -116,7 +118,8 @@ class MLP_learner(nn.Module):
             cols_ = torch.cat((cols, rows))
             values_ = torch.cat((values, values))
             values_ = apply_non_linearity(values_, self.non_linearity, self.i)
-            adj = dgl.graph((rows_, cols_), num_nodes=features.shape[0], device='cuda')
+            adj = dgl.graph(
+                (rows_, cols_), num_nodes=features.shape[0], device='cuda')
             adj.edata['w'] = values_
             return adj
         else:
@@ -124,7 +127,8 @@ class MLP_learner(nn.Module):
             embeddings = F.normalize(embeddings, dim=1, p=2)
             similarities = cal_similarity_graph(embeddings)
             similarities = top_k(similarities, self.k + 1)
-            similarities = apply_non_linearity(similarities, self.non_linearity, self.i)
+            similarities = apply_non_linearity(
+                similarities, self.non_linearity, self.i)
             return similarities
 
 
@@ -174,7 +178,8 @@ class GNN_learner(nn.Module):
             cols_ = torch.cat((cols, rows))
             values_ = torch.cat((values, values))
             values_ = apply_non_linearity(values_, self.non_linearity, self.i)
-            adj = dgl.graph((rows_, cols_), num_nodes=features.shape[0], device='cuda')
+            adj = dgl.graph(
+                (rows_, cols_), num_nodes=features.shape[0], device='cuda')
             adj.edata['w'] = values_
             return adj
         else:
@@ -182,5 +187,6 @@ class GNN_learner(nn.Module):
             embeddings = F.normalize(embeddings, dim=1, p=2)
             similarities = cal_similarity_graph(embeddings)
             similarities = top_k(similarities, self.k + 1)
-            similarities = apply_non_linearity(similarities, self.non_linearity, self.i)
+            similarities = apply_non_linearity(
+                similarities, self.non_linearity, self.i)
             return similarities
