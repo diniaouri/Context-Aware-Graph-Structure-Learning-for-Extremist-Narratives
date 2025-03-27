@@ -95,7 +95,8 @@ Default config is exp_nb 0, so start from there when modifying.
 
 4. **Postprocessing and Analysis**:
 
-   Currently, choosing the adjacency matrix to study is based on changing the file name in new_graph_eval.py at the beginning of the init method.
+   Currently, choosing the dataset to study is based on changing the experiment_nb and Dataset class at the beginning of the main method.
+   Make sure to use the right adjacency file for the experiment chosen.
    To run the analysis, choose the functions you want to run by modifying new_graph_eval.py:
 
    ```
@@ -103,5 +104,5 @@ Default config is exp_nb 0, so start from there when modifying.
    ```
 
 ## Presentation
-
+Personal presentation, not final.
 https://docs.google.com/presentation/d/1-x08BoN2pvqaBrN1R_wAmzSJ4UV5NYGVvJUmaMGe7Gg/edit?usp=sharing
