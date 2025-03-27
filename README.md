@@ -101,3 +101,22 @@ Default config is exp_nb 0, so start from there when modifying.
    ```
    python new_graph_eval.py
    ```
+
+
+## Run with Docker
+
+1. Build the script
+
+```bash
+docker build -t projet_recherche_arenas .
+```
+
+2. Run the script
+
+```bash
+docker run -it projet_recherche_arenas # + experiment number (-exp_nb 1 ...)
+```
+
+## Presentation
+
+https://docs.google.com/presentation/d/1-x08BoN2pvqaBrN1R_wAmzSJ4UV5NYGVvJUmaMGe7Gg/edit?usp=sharing
