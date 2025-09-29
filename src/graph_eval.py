@@ -13,6 +13,12 @@ from preprocessing import (
     OldSchemaA1Dataset,
     ARENASFrenchAnnotator1Dataset,
     ARENASFrenchAnnotator2Dataset,
+    ARENASGermanAnnotator1Dataset,
+    ARENASGermanAnnotator2Dataset,
+    ARENASCypriotAnnotator1Dataset,
+    ARENASCypriotAnnotator2Dataset,
+    ARENASSloveneAnnotator1Dataset,
+    ARENASSloveneAnnotator2Dataset,
     ToxigenDataset,
     LGBTEnDataset,
     MigrantsEnDataset,
@@ -26,6 +32,12 @@ DATASETS = {
     "OldSchemaA1": OldSchemaA1Dataset,
     "ARENASFrenchAnnotator1": ARENASFrenchAnnotator1Dataset,
     "ARENASFrenchAnnotator2": ARENASFrenchAnnotator2Dataset,
+    "ARENASGermanAnnotator1": ARENASGermanAnnotator1Dataset,
+    "ARENASGermanAnnotator2": ARENASGermanAnnotator2Dataset,
+    "ARENASCypriotAnnotator1": ARENASCypriotAnnotator1Dataset,
+    "ARENASCypriotAnnotator2": ARENASCypriotAnnotator2Dataset,
+    "ARENASSloveneAnnotator1": ARENASSloveneAnnotator1Dataset,
+    "ARENASSloveneAnnotator2": ARENASSloveneAnnotator2Dataset,
     "Toxigen": ToxigenDataset,
     "LGBTEn": LGBTEnDataset,
     "MigrantsEn": MigrantsEnDataset,
@@ -300,128 +312,4 @@ class ThresholdAnalysis(GraphAnalysis):
         plt.savefig(fname)
         plt.close()
         info = (
-            f"Similarity homophily vs threshold (feature: {feature}):\n"
-            "Shows how homophily changes as the edge threshold is varied. High values indicate edges connect similar nodes; low values indicate less similarity in connections.\n"
-            f"{embed_image(fname)}"
-        )
-        return info
-
-    def plot_assortativity_variation(self, feature):
-        assortativities = []
-        for t in self.thresholds:
-            adj = self.adj_matrix.copy()
-            adj[adj < t] = 0
-            np.fill_diagonal(adj, 0)
-            G = nx.from_numpy_array(adj)
-            nx.set_node_attributes(G, self.node_features.to_dict('index'))
-            try:
-                a = nx.attribute_assortativity_coefficient(G, feature)
-            except Exception:
-                a = np.nan
-            assortativities.append(a)
-        plt.figure(figsize=(8, 5))
-        plt.plot(self.thresholds, assortativities)
-        plt.xlabel("Threshold Value")
-        plt.ylabel(f"Assortativity ({feature})")
-        plt.title(f"Assortativity of {feature} vs Threshold")
-        fname = os.path.join(self.out_folder, f"{safe_fname(feature)}_assortativity_vs_threshold.png")
-        plt.savefig(fname)
-        plt.close()
-        info = (
-            f"Assortativity vs threshold (feature: {feature}):\n"
-            "Shows how assortative mixing (preference for connections to nodes with the same attribute value) changes as the threshold increases.\n"
-            f"{embed_image(fname)}"
-        )
-        return info
-
-def main():
-    matplotlib.rcParams['font.size'] = 14
-    parser = argparse.ArgumentParser(description="Graph analysis with homophily and assortativity.")
-    parser.add_argument("--adjacency", required=True, help="Path to adjacency matrix pickle file")
-    parser.add_argument("--dataset", required=True, choices=DATASETS.keys(), help="Dataset type")
-    parser.add_argument("--experiment_nb", type=int, default=0, help="Experiment number for dataset")
-    parser.add_argument("--output", default="graph_analysis_results", help="Folder to save results")
-    parser.add_argument("--threshold", type=float, default=0.05, help="Threshold for single graph analysis")
-    parser.add_argument("--threshold_sweep", action="store_true", help="Run threshold sweep visualizations")
-    parser.add_argument("--communities", type=int, default=5, help="Number of communities to plot")
-    parser.add_argument("--features", nargs="+", default=[
-        "Topic",
-        "In-Group",
-        "Out-group",
-        "Superiority of in-group",
-        "Intolerance",
-        "Polarization/Othering"
-    ], help="Features to plot homophily/assortativity for")
-    parser.add_argument("--connected_components", action="store_true", help="Plot connected components")
-    parser.add_argument("--group_ratios", action="store_true", help="Show group ratios in summary")
-    parser.add_argument("--homophily_all", action="store_true", help="Calculate homophily for all main features")
-    args = parser.parse_args()
-
-    # Only load the data (and not embeddings)
-    dataset = DATASETS[args.dataset](experiment_nb=args.experiment_nb, embeddings_path=None, skip_embeddings=True)
-    info_blocks = []
-    columns_all = [
-        "Topic",
-        "In-Group",
-        "Out-group",
-        "Initiating Problem",
-        "Intolerance",
-        "Superiority of in-group",
-        "Hostility to out-group (e.g. verbal attacks, belittlement, instillment of fear, incitement to violence)",
-        "Polarization/Othering",
-        "Perceived Threat",
-        "Setting",
-        "Emotional response",
-        "Solution",
-        "Appeal to Authority",
-        "Appeal to Reason",
-        "Appeal to Probability",
-        "Conspiracy Theories",
-        "Irony/Humor"
-    ]
-
-    # Threshold sweep visualizations
-    if args.threshold_sweep:
-        thresholds = np.linspace(0.0001, 0.5, 400)
-        threshold_analysis = ThresholdAnalysis(args.adjacency, dataset, thresholds, args.output)
-        info_blocks.append("----- EDGES VS THRESHOLD -----")
-        info_blocks.append(threshold_analysis.plot_nb_edges_variation())
-        info_blocks.append("----- CONNECTED COMPONENTS VS THRESHOLD -----")
-        info_blocks.append(threshold_analysis.plot_connected_components_evolution())
-        for feature in args.features:
-            info_blocks.append(f"----- HOMOPHILY VS THRESHOLD ({feature}) -----")
-            info_blocks.append(threshold_analysis.plot_homophily_variation(feature))
-            info_blocks.append(f"----- ASSORTATIVITY VS THRESHOLD ({feature}) -----")
-            info_blocks.append(threshold_analysis.plot_assortativity_variation(feature))
-
-    # Single graph analysis
-    analysis = GraphAnalysis(args.adjacency, dataset, args.output)
-    info, stats, G = analysis.summary_stats(args.threshold)
-    info_blocks.append("----- GRAPH SUMMARY -----")
-    info_blocks.append(info)
-    if args.connected_components:
-        info_blocks.append("----- CONNECTED COMPONENTS -----")
-        info_blocks.append(analysis.plot_connected_components(args.threshold))
-    if args.communities > 0:
-        info_blocks.append("----- COMMUNITY STRUCTURE -----")
-        info_blocks.append(analysis.plot_communities(args.threshold, args.communities))
-    if args.group_ratios:
-        info_blocks.append("----- GROUP RATIOS -----")
-        info_blocks.append(analysis.save_group_ratios(args.threshold))
-    for feature in args.features:
-        info_blocks.append(f"----- HOMOPHILY ({feature}) -----")
-        info_blocks.append(analysis.homophily(args.threshold, feature)[0])
-        info_blocks.append(f"----- ASSORTATIVITY ({feature}) -----")
-        info_blocks.append(analysis.assortativity(args.threshold, feature))
-    if args.homophily_all:
-        info_blocks.append("----- HOMOPHILY ALL FEATURES -----")
-        info_blocks.append(analysis.homophily_all_columns(args.threshold, columns_all))
-
-    # All info in one file
-    info_file = os.path.join(args.output, f"full_analysis_info_{args.threshold}.md")
-    with open(info_file, "w") as f:
-        f.write("\n\n".join(info_blocks))
-    print(f"\nAll analysis info and plot summaries saved to {info_file}")
-
-if __name__ == "__main__":
-    main()
+            f"Similarity homophily vs threshold (feature: {feature}

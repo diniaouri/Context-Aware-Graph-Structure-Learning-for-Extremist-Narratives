@@ -8,8 +8,8 @@ import torch.optim as optim
 import dgl
 from dgl.nn import GraphConv, SAGEConv
 import pickle
-import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.model_selection import StratifiedKFold
 
 from preprocessing import (
     SchemaA1Dataset,
@@ -18,6 +18,12 @@ from preprocessing import (
     SelectedDataset,
     ARENASFrenchAnnotator1Dataset,
     ARENASFrenchAnnotator2Dataset,
+    ARENASGermanAnnotator1Dataset,
+    ARENASGermanAnnotator2Dataset,
+    ARENASCypriotAnnotator1Dataset,
+    ARENASCypriotAnnotator2Dataset,
+    ARENASSloveneAnnotator1Dataset,
+    ARENASSloveneAnnotator2Dataset,
     ToxigenDataset,
     LGBTEnDataset,
     MigrantsEnDataset,
@@ -30,6 +36,12 @@ DATASETS = {
     "Selected": SelectedDataset,
     "ARENASFrenchAnnotator1": ARENASFrenchAnnotator1Dataset,
     "ARENASFrenchAnnotator2": ARENASFrenchAnnotator2Dataset,
+    "ARENASGermanAnnotator1": ARENASGermanAnnotator1Dataset,
+    "ARENASGermanAnnotator2": ARENASGermanAnnotator2Dataset,
+    "ARENASCypriotAnnotator1": ARENASCypriotAnnotator1Dataset,
+    "ARENASCypriotAnnotator2": ARENASCypriotAnnotator2Dataset,
+    "ARENASSloveneAnnotator1": ARENASSloveneAnnotator1Dataset,
+    "ARENASSloveneAnnotator2": ARENASSloveneAnnotator2Dataset,
     "Toxigen": ToxigenDataset,
     "LGBTEn": LGBTEnDataset,
     "MigrantsEn": MigrantsEnDataset,
@@ -48,93 +60,30 @@ def parse_args():
                         help='Experiment number (for dataset init)')
     parser.add_argument('--embedding_col', type=str, default=None,
                         help='If your dataset supports multiple embedding columns, specify here')
-    parser.add_argument('--train_split', type=float, default=0.4,
-                        help='Ratio of nodes for training')
-    parser.add_argument('--test_split', type=float, default=0.6,
-                        help='Ratio of nodes for test')
+    parser.add_argument('--n_splits', type=int, default=5,
+                        help='Number of stratified folds')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='Number of training epochs')
     parser.add_argument('--model', type=str, default='GraphSAGE', choices=['GCN', 'GraphSAGE'],
                         help='GNN model to use')
-    parser.add_argument('--runs', type=int, default=10,
-                        help='How many runs to average')
     parser.add_argument('--seed', type=int, default=42,
-                        help='Base random seed')
+                        help='Random seed')
+    parser.add_argument('--n_runs', type=int, default=1,
+                        help='Number of repeated runs (outer repetitions of k-fold)')
     return parser.parse_args()
 
 def load_dataset(name, experiment_nb):
     return DATASETS[name](experiment_nb=experiment_nb)
 
-def run_once(args, run_idx):
-    # Set unique seed for reproducibility
-    np.random.seed(args.seed + run_idx)
-    torch.manual_seed(args.seed + run_idx)
-    # Load adjacency matrix
-    with open(args.adjacency_matrix, 'rb') as f:
-        adj_matrix = pickle.load(f)
-    if isinstance(adj_matrix, torch.Tensor):
-        adj = adj_matrix.numpy()
-    else:
-        adj = adj_matrix
-
-    # Load dataset
-    dataset = load_dataset(args.dataset, args.experiment_nb)
-    node_features = dataset.data
-
-    if args.label_col not in node_features.columns:
-        raise ValueError(f"Label column '{args.label_col}' not found in dataset columns: {node_features.columns}")
-    node_features = node_features.dropna(subset=[args.label_col])
-    node_features = node_features.reset_index(drop=True)
-
-    # Label encoding
-    unique_labels = node_features[args.label_col].unique()
-    label_to_num = {label: idx for idx, label in enumerate(unique_labels)}
-    node_features['label'] = node_features[args.label_col].map(label_to_num)
-    nb_classes = len(unique_labels)
-
-    # Embeddings
-    if args.embedding_col and args.embedding_col in node_features.columns:
-        tweet_embeddings = node_features[args.embedding_col].values
-    else:
-        tweet_embeddings = dataset.embeddings
-    if isinstance(tweet_embeddings, list):
-        tweet_embeddings = np.stack(tweet_embeddings)
-    elif isinstance(tweet_embeddings, pd.Series):
-        tweet_embeddings = np.stack(tweet_embeddings.values)
-    elif isinstance(tweet_embeddings, np.ndarray):
-        pass
-    else:
-        tweet_embeddings = np.array(tweet_embeddings)
-
-    assert adj.shape[0] == len(node_features), "Mismatch between adjacency matrix and node count"
-    assert tweet_embeddings.shape[0] == len(node_features), "Mismatch between embeddings and node count"
-
-    src, dst = np.nonzero(adj)
-    graph = dgl.graph((src, dst))
-    graph = dgl.to_simple(graph)
-
-    labels_tensor = torch.tensor(node_features['label'].values, dtype=torch.long)
-    graph.ndata['feat'] = torch.tensor(tweet_embeddings, dtype=torch.float32)
-    graph.ndata['label'] = labels_tensor
-
-    # Train/Test split (shuffle per run)
-    n_nodes = graph.num_nodes()
-    all_indices = np.arange(n_nodes)
-    np.random.shuffle(all_indices)
-    train_size = int(args.train_split * n_nodes)
-    test_size = int(args.test_split * n_nodes)
-    train_idx = all_indices[:train_size]
-    test_idx = all_indices[train_size:train_size+test_size]
-
-    train_mask = torch.zeros(n_nodes, dtype=torch.bool)
-    test_mask = torch.zeros(n_nodes, dtype=torch.bool)
+def run_fold(graph, train_idx, test_idx, model_name, nb_classes, in_feats, tweet_embeddings, labels_tensor, epochs, device):
+    train_mask = torch.zeros(graph.num_nodes(), dtype=torch.bool)
+    test_mask = torch.zeros(graph.num_nodes(), dtype=torch.bool)
     train_mask[train_idx] = True
     test_mask[test_idx] = True
 
     graph.ndata['train_mask'] = train_mask
     graph.ndata['test_mask'] = test_mask
 
-    # Model definition
     class GCN(nn.Module):
         def __init__(self, in_feats, hidden_feats, num_classes):
             super(GCN, self).__init__()
@@ -159,35 +108,37 @@ def run_once(args, run_idx):
             h = self.sage2(graph, h)
             return h
 
-    in_feats = tweet_embeddings.shape[1]
     hidden_feats = 32
     learning_rate = 0.01
-    num_epochs = args.epochs
 
-    if args.model == "GCN":
+    if model_name == "GCN":
         model = GCN(in_feats, hidden_feats, nb_classes)
     else:
         model = GraphSAGE(in_feats, hidden_feats, nb_classes)
+    model = model.to(device)
 
     loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
+    features = torch.tensor(tweet_embeddings, dtype=torch.float32).to(device)
+    labels = labels_tensor.to(device)
+    graph = graph.to(device)
+
     # Training loop
-    for epoch in range(num_epochs):
+    for epoch in range(epochs):
         model.train()
-        logits = model(graph, graph.ndata['feat'])
-        loss = loss_fn(logits[graph.ndata['train_mask']],
-                       graph.ndata['label'][graph.ndata['train_mask']])
+        logits = model(graph, features)
+        loss = loss_fn(logits[train_mask], labels[train_mask])
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
     # Final evaluation
     model.eval()
     with torch.no_grad():
-        logits = model(graph, graph.ndata['feat'])
+        logits = model(graph, features)
         pred_class = logits.argmax(dim=1)
-        test_pred = pred_class[graph.ndata['test_mask']].cpu().numpy()
-        test_true = graph.ndata['label'][graph.ndata['test_mask']].cpu().numpy()
+        test_pred = pred_class[test_mask].cpu().numpy()
+        test_true = labels[test_mask].cpu().numpy()
         acc = accuracy_score(test_true, test_pred)
         f1_macro = f1_score(test_true, test_pred, average="macro")
         f1_micro = f1_score(test_true, test_pred, average="micro")
@@ -207,25 +158,107 @@ def run_once(args, run_idx):
 
 def main():
     args = parse_args()
-    all_results = []
-    for run_idx in range(args.runs):
-        run_result = run_once(args, run_idx)
-        print(f"\n=== Run {run_idx+1}/{args.runs} ===")
-        print(f"Accuracy:        {run_result['accuracy']:.4f}")
-        print(f"F1 Macro:        {run_result['f1_macro']:.4f}")
-        print(f"F1 Micro:        {run_result['f1_micro']:.4f}")
-        print(f"Precision Macro: {run_result['precision_macro']:.4f}")
-        print(f"Recall Macro:    {run_result['recall_macro']:.4f}")
-        print(f"Precision Micro: {run_result['precision_micro']:.4f}")
-        print(f"Recall Micro:    {run_result['recall_micro']:.4f}")
-        all_results.append(run_result)
-    # Aggregate results
-    metrics = list(all_results[0].keys())
-    avg_results = {metric: np.mean([r[metric] for r in all_results]) for metric in metrics}
-    std_results = {metric: np.std([r[metric] for r in all_results]) for metric in metrics}
-    print("\n=== Average over {} runs ===".format(args.runs))
+
+    all_runs_results = []
+    per_run_avgs = []
+
+    for run in range(args.n_runs):
+        run_seed = args.seed + run
+        np.random.seed(run_seed)
+        torch.manual_seed(run_seed)
+
+        # Load adjacency matrix
+        with open(args.adjacency_matrix, 'rb') as f:
+            adj_matrix = pickle.load(f)
+        if isinstance(adj_matrix, torch.Tensor):
+            adj = adj_matrix.numpy()
+        else:
+            adj = adj_matrix
+
+        # Load dataset
+        dataset = load_dataset(args.dataset, args.experiment_nb)
+        node_features = dataset.data
+
+        if args.label_col not in node_features.columns:
+            raise ValueError(f"Label column '{args.label_col}' not found in dataset columns: {node_features.columns}")
+        node_features = node_features.dropna(subset=[args.label_col])
+        node_features = node_features.reset_index(drop=True)
+
+        # Label encoding
+        unique_labels = node_features[args.label_col].unique()
+        label_to_num = {label: idx for idx, label in enumerate(unique_labels)}
+        node_features['label'] = node_features[args.label_col].map(label_to_num)
+        nb_classes = len(unique_labels)
+
+        # Embeddings
+        if args.embedding_col and args.embedding_col in node_features.columns:
+            tweet_embeddings = node_features[args.embedding_col].values
+        else:
+            tweet_embeddings = dataset.embeddings
+        if isinstance(tweet_embeddings, list):
+            tweet_embeddings = np.stack(tweet_embeddings)
+        elif isinstance(tweet_embeddings, pd.Series):
+            tweet_embeddings = np.stack(tweet_embeddings.values)
+        elif isinstance(tweet_embeddings, np.ndarray):
+            pass
+        else:
+            tweet_embeddings = np.array(tweet_embeddings)
+
+        assert adj.shape[0] == len(node_features), "Mismatch between adjacency matrix and node count"
+        assert tweet_embeddings.shape[0] == len(node_features), "Mismatch between embeddings and node count"
+
+        src, dst = np.nonzero(adj)
+        graph = dgl.graph((src, dst))
+        graph = dgl.to_simple(graph)
+
+        labels_tensor = torch.tensor(node_features['label'].values, dtype=torch.long)
+        in_feats = tweet_embeddings.shape[1]
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=run_seed)
+        labels = node_features['label'].values
+        run_results = []
+
+        for fold, (train_idx, test_idx) in enumerate(skf.split(np.zeros_like(labels), labels)):
+            print(f"\n=== Run {run+1}/{args.n_runs}, Fold {fold + 1}/{args.n_splits} ===")
+            result = run_fold(
+                graph, train_idx, test_idx, args.model, nb_classes,
+                in_feats, tweet_embeddings, labels_tensor, args.epochs, device)
+            for metric, val in result.items():
+                print(f"{metric}: {val:.4f}")
+            run_results.append(result)
+        all_runs_results.append(run_results)
+
+        # Per-run averages
+        metrics = list(run_results[0].keys())
+        run_avg = {metric: np.mean([fold_result[metric] for fold_result in run_results]) for metric in metrics}
+        per_run_avgs.append(run_avg)
+        print(f"\n=== Average for Run {run+1}/{args.n_runs} ===")
+        for metric in metrics:
+            vals = [fold_result[metric] for fold_result in run_results]
+            print(f"  {metric}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+
+    # Aggregate results across all runs and folds
+    metrics = list(all_runs_results[0][0].keys())
+    # Flatten all [runs][folds] into [runs*folds]
+    all_metrics = {metric: [] for metric in metrics}
+    for run_results in all_runs_results:
+        for fold_result in run_results:
+            for metric in metrics:
+                all_metrics[metric].append(fold_result[metric])
+    print("\n=== Overall Results Across All Runs and Folds ===")
     for metric in metrics:
-        print(f"{metric}: {avg_results[metric]:.4f} ± {std_results[metric]:.4f}")
+        avg = np.mean(all_metrics[metric])
+        std = np.std(all_metrics[metric])
+        print(f"{metric}: {avg:.4f} ± {std:.4f}")
+
+    # Averages of the 10 runs
+    print("\n=== Average of the average of the {} runs ===".format(args.n_runs))
+    for metric in metrics:
+        per_run_metric_avgs = [run_avg[metric] for run_avg in per_run_avgs]
+        avg = np.mean(per_run_metric_avgs)
+        std = np.std(per_run_metric_avgs)
+        print(f"{metric}: {avg:.4f} ± {std:.4f}")
 
 if __name__ == "__main__":
     main()

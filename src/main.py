@@ -12,7 +12,13 @@ from preprocessing import (
     ARENASFrenchAnnotator2Dataset,
     ToxigenDataset,
     LGBTEnDataset,
-    MigrantsEnDataset
+    MigrantsEnDataset,
+    ARENASGermanAnnotator1Dataset,
+    ARENASGermanAnnotator2Dataset,
+    ARENASCypriotAnnotator1Dataset,
+    ARENASCypriotAnnotator2Dataset,
+    ARENASSloveneAnnotator1Dataset,
+    ARENASSloveneAnnotator2Dataset,
 )
 from model import GCN, GCL
 from graph_learners import FGP_learner, ATT_learner, GNN_learner, MLP_learner
@@ -231,6 +237,24 @@ class Experiment:
         elif args.exp_nb == 8:
             dataset = MigrantsEnDataset(args.exp_nb, embeddings_path=args.embeddings_path)
             context_dataset = dataset
+        elif args.exp_nb == 9:
+            dataset = ARENASGermanAnnotator1Dataset(args.exp_nb, embeddings_path=args.embeddings_path)
+            context_dataset = dataset
+        elif args.exp_nb == 10:
+            dataset = ARENASGermanAnnotator2Dataset(args.exp_nb, embeddings_path=args.embeddings_path)
+            context_dataset = dataset
+        elif args.exp_nb == 11:
+            dataset = ARENASCypriotAnnotator1Dataset(args.exp_nb, embeddings_path=args.embeddings_path)
+            context_dataset = dataset
+        elif args.exp_nb == 12:
+            dataset = ARENASCypriotAnnotator2Dataset(args.exp_nb, embeddings_path=args.embeddings_path)
+            context_dataset = dataset
+        elif args.exp_nb == 13:
+            dataset = ARENASSloveneAnnotator1Dataset(args.exp_nb, embeddings_path=args.embeddings_path)
+            context_dataset = dataset
+        elif args.exp_nb == 14:
+            dataset = ARENASSloveneAnnotator2Dataset(args.exp_nb, embeddings_path=args.embeddings_path)
+            context_dataset = dataset
         else:
             raise ValueError(f"Unknown experiment number: {args.exp_nb}")
 
@@ -272,6 +296,8 @@ class Experiment:
             elif type_learner == 'gnn':
                 graph_learner = GNN_learner(2, features.shape[1], args.k, args.sim_function, 6, args.sparse,
                                             args.activation_learner, anchor_adj)
+            else:
+                raise ValueError(f"Unknown type_learner: {type_learner}. Please check your configuration or command-line arguments. Must be one of: 'fgp', 'mlp', 'att', 'gnn'.")
 
             model = GCL(nlayers=args.nlayers, in_dim=nfeats, hidden_dim=args.hidden_dim,
                         emb_dim=args.rep_dim, proj_dim=args.proj_dim,

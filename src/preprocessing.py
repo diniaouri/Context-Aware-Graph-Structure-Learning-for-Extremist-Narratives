@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from sentence_transformers import SentenceTransformer
+from sklearn.preprocessing import LabelEncoder
 
 class PreprocessedDataset(ABC):
     def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
@@ -92,7 +93,8 @@ class PreprocessedDataset(ABC):
 def remove_file_extension(filename: str) -> str:
     return os.path.splitext(filename)[0]
 
-# --- Only keep the required datasets below ---
+# --- Datasets ---
+
 class FullFrenchTweetDataset(PreprocessedDataset):
     def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
         self.dataset_name: str = "All_french_tweet_data"
@@ -176,6 +178,7 @@ class SelectedDataset(PreprocessedDataset):
         df = df.rename(columns={"Document": "Text"})
         return df
 
+# ---- FRENCH ----
 class ARENASFrenchAnnotator1Dataset(PreprocessedDataset):
     CONTEXT_COLUMNS_FULL = [
         "Topic", "In-Group", "Out-group", "Initiating Problem", "Intolerance", "Superiority of in-group",
@@ -212,12 +215,7 @@ class ARENASFrenchAnnotator1Dataset(PreprocessedDataset):
         return out
 
 class ARENASFrenchAnnotator2Dataset(PreprocessedDataset):
-    CONTEXT_COLUMNS_FULL = [
-        "Topic", "In-Group", "Out-group", "Initiating Problem", "Intolerance", "Superiority of in-group",
-        "Hostility to out-group (e.g. verbal attacks, belittlement, instilment of fear, incitement to violence)",
-        "Polarization/Othering", "Perceived Threat", "Setting", "Emotional response", "Solution",
-        "Appeal to Authority", "Appeal to Reason", "Appeal to Probability", "Conspiracy Theories", "Irony/Humor"
-    ]
+    CONTEXT_COLUMNS_FULL = ARENASFrenchAnnotator1Dataset.CONTEXT_COLUMNS_FULL
     def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
         self.dataset_name: str = "ARENAS_DATA_FRENCH_2ND_Annotator"
         self.data = self.clean_up_dataset()
@@ -233,19 +231,187 @@ class ARENASFrenchAnnotator2Dataset(PreprocessedDataset):
         return df
 
     def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
+        return ARENASFrenchAnnotator1Dataset.get_context_attributes(self, indices, columns)
+
+# ---- GERMAN ----
+class ARENASGermanAnnotator1Dataset(PreprocessedDataset):
+    CONTEXT_COLUMNS_FULL = ARENASFrenchAnnotator1Dataset.CONTEXT_COLUMNS_FULL
+    def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
+        self.dataset_name: str = "ARENAS_DATA_GERMAN_1st_Annotator"
+        self.data = self.clean_up_dataset()
+        super().__init__(experiment_nb, embeddings_path, skip_embeddings)
+
+    def clean_up_dataset(self) -> pd.DataFrame:
+        df = pd.read_excel("./datasets/ARENAS_DATA_GERMAN_1st_Annotator.xlsx",
+                           header=4, usecols="B, AH:AZ")
+        df = df.dropna(subset=["Text", "In-Group", "Out-group"])
+        df = df.reset_index(drop=True)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
+        df.to_csv("ty_german_1st_annotator.csv")
+        return df
+
+    def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
+        return ARENASFrenchAnnotator1Dataset.get_context_attributes(self, indices, columns)
+
+class ARENASGermanAnnotator2Dataset(PreprocessedDataset):
+    CONTEXT_COLUMNS_FULL = ARENASFrenchAnnotator1Dataset.CONTEXT_COLUMNS_FULL
+    def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
+        self.dataset_name: str = "ARENAS_DATA_GERMAN_2ND_Annotator"
+        self.data = self.clean_up_dataset()
+        super().__init__(experiment_nb, embeddings_path, skip_embeddings)
+
+    def clean_up_dataset(self) -> pd.DataFrame:
+        df = pd.read_excel("./datasets/ARENAS_DATA_GERMAN_2nd_Annotator.xlsx",
+                           header=4, usecols="B, AH:AZ")
+        df = df.dropna(subset=["Text", "In-Group", "Out-group"])
+        df = df.reset_index(drop=True)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
+        df.to_csv("ty_german_2nd_annotator.csv")
+        return df
+
+    def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
+        return ARENASFrenchAnnotator1Dataset.get_context_attributes(self, indices, columns)
+
+# ---- CYPRIOT ----
+class ARENASCypriotAnnotator1Dataset(PreprocessedDataset):
+    CONTEXT_COLUMNS_FULL = [
+        "Topic", "Tone of Post", "In-Group", "Out-group", "Narrator",
+        "Intolerance", "Hostility to out-group (e.g. verbal attacks, belittlement, instillment of fear, incitement to violence)",
+        "Polarization/Othering", "Perceived Threat", "Character(s)", "Setting",
+        "Initiating Problem", "Emotional response", "Solution",
+        "Appeal to Authority", "Appeal to Reason", "Appeal to Probability",
+        "Conspiracy Theories", "Irony/Humor"
+    ]
+    def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
+        self.dataset_name: str = "ARENAS_DATA_CYPRIOT_1st_Annotator"
+        self.data = self.clean_up_dataset()
+        super().__init__(experiment_nb, embeddings_path, skip_embeddings)
+
+    def clean_up_dataset(self) -> pd.DataFrame:
+        # Try all header rows until you find the real header
+        found = False
+        for hdr in range(0, 15):
+            df = pd.read_excel("./datasets/ARENAS_DATA_CYPRIOT_1st_Annotator.xlsx", header=hdr)
+            colnames = list(df.columns)
+            if "Tweet, text" in colnames and "In-Group" in colnames and "Out-group" in colnames:
+                found = True
+                print(f"USING header={hdr}")
+                break
+        if not found:
+            print("DEBUG: Could not find header row with required columns. Here are some column samples:")
+            for hdr in range(0, 15):
+                df = pd.read_excel("./datasets/ARENAS_DATA_CYPRIOT_1st_Annotator.xlsx", header=hdr)
+                print(f"header={hdr}: {list(df.columns)[:20]}")
+            raise ValueError("Could not find header row with required columns. Please check your Excel file.")
+
+        df = df.rename(columns={"Tweet, text": "Text"})
+        select_cols = ["Text"] + self.CONTEXT_COLUMNS_FULL
+        missing = [col for col in select_cols if col not in df.columns]
+        if missing:
+            print("DEBUG COLUMNS:", df.columns)
+            print("DEBUG: Check for typos or extra spaces in your Excel columns. Here are the missing:", missing)
+            raise ValueError(f"Missing columns: {missing}. Columns are: {df.columns}")
+        df = df[select_cols]
+        df = df.dropna(subset=["Text", "In-Group", "Out-group"])
+        df = df.reset_index(drop=True)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
+        return df
+
+    def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
         if columns is None:
             columns = self.CONTEXT_COLUMNS_FULL
-        missing_cols = [col for col in columns if col not in self.data.columns]
-        if missing_cols:
-            raise ValueError(f"Requested context columns not found in dataset: {missing_cols}")
-        out = []
-        for i in indices:
-            entry = []
-            for col in columns:
-                entry.append(self.data.iloc[i][col])
-            out.append(tuple(entry))
-        return out
+        return [tuple(self.data.iloc[i][col] for col in columns) for i in indices]
 
+class ARENASCypriotAnnotator2Dataset(PreprocessedDataset):
+    CONTEXT_COLUMNS_FULL = ARENASCypriotAnnotator1Dataset.CONTEXT_COLUMNS_FULL
+    def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
+        self.dataset_name: str = "ARENAS_DATA_CYPRIOT_2nd_Annotator"
+        self.data = self.clean_up_dataset()
+        super().__init__(experiment_nb, embeddings_path, skip_embeddings)
+
+    def clean_up_dataset(self) -> pd.DataFrame:
+        found = False
+        for hdr in range(0, 15):
+            df = pd.read_excel("./datasets/ARENAS_DATA_CYPRIOT_2nd_Annotator.xlsx", header=hdr)
+            colnames = list(df.columns)
+            if "Tweet, text" in colnames and "In-Group" in colnames and "Out-group" in colnames:
+                found = True
+                print(f"USING header={hdr}")
+                break
+        if not found:
+            print("DEBUG: Could not find header row with required columns. Here are some column samples:")
+            for hdr in range(0, 15):
+                df = pd.read_excel("./datasets/ARENAS_DATA_CYPRIOT_2nd_Annotator.xlsx", header=hdr)
+                print(f"header={hdr}: {list(df.columns)[:20]}")
+            raise ValueError("Could not find header row with required columns. Please check your Excel file.")
+
+        df = df.rename(columns={"Tweet, text": "Text"})
+        select_cols = ["Text"] + self.CONTEXT_COLUMNS_FULL
+        missing = [col for col in select_cols if col not in df.columns]
+        if missing:
+            print("DEBUG COLUMNS:", df.columns)
+            print("DEBUG: Check for typos or extra spaces in your Excel columns. Here are the missing:", missing)
+            raise ValueError(f"Missing columns: {missing}. Columns are: {df.columns}")
+        df = df[select_cols]
+        df = df.dropna(subset=["Text", "In-Group", "Out-group"])
+        df = df.reset_index(drop=True)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
+        return df
+
+    def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
+        return ARENASCypriotAnnotator1Dataset.get_context_attributes(self, indices, columns)
+
+# ---- SLOVENE ----
+class ARENASSloveneAnnotator1Dataset(PreprocessedDataset):
+    CONTEXT_COLUMNS_FULL = [
+        "Topic", "Tone of Post", "In-Group", "Out-group", "Narrator",
+        "Intolerance", "Hostility to out-group", "Polarization/Othering", "Perceived Threat",
+        "Character(s)", "Setting", "Initiating Problem", "Emotional response", "Solution",
+        "Appeal to Authority", "Appeal to Reason", "Appeal to Probability", "Conspiracy Theories", "Irony/Humor"
+    ]
+    def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
+        self.dataset_name: str = "ARENAS_DATA_SLOVENE_1st_Annotator"
+        self.data = self.clean_up_dataset()
+        super().__init__(experiment_nb, embeddings_path, skip_embeddings)
+    def clean_up_dataset(self) -> pd.DataFrame:
+        df = pd.read_excel("./datasets/ARENAS_DATA_SLOVENE_1st_Annotator.xlsx", header=4, usecols="E, AJ:BB")
+        df = df.rename(columns={"Tweet, Text": "Text"})
+        required_cols = ["Text", "In-Group", "Out-group"]
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            print("DEBUG COLUMNS:", df.columns)
+            raise ValueError(f"Missing Slovene columns: {missing}. Columns are: {df.columns}")
+        df = df.dropna(subset=required_cols)
+        df = df.reset_index(drop=True)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
+        return df
+    def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
+        if columns is None:
+            columns = self.CONTEXT_COLUMNS_FULL
+        return [tuple(self.data.iloc[i][col] for col in columns) for i in indices]
+
+class ARENASSloveneAnnotator2Dataset(PreprocessedDataset):
+    CONTEXT_COLUMNS_FULL = ARENASSloveneAnnotator1Dataset.CONTEXT_COLUMNS_FULL
+    def __init__(self, experiment_nb: int = 1, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
+        self.dataset_name: str = "ARENAS_DATA_SLOVENE_2nd_Annotator"
+        self.data = self.clean_up_dataset()
+        super().__init__(experiment_nb, embeddings_path, skip_embeddings)
+    def clean_up_dataset(self) -> pd.DataFrame:
+        df = pd.read_excel("./datasets/ARENAS_DATA_SLOVENE_2nd_Annotator.xlsx", header=4, usecols="E, AJ:BB")
+        df = df.rename(columns={"Tweet, Text": "Text"})
+        required_cols = ["Text", "In-Group", "Out-group"]
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            print("DEBUG COLUMNS:", df.columns)
+            raise ValueError(f"Missing Slovene columns: {missing}. Columns are: {df.columns}")
+        df = df.dropna(subset=required_cols)
+        df = df.reset_index(drop=True)
+        df["Text"] = df["Text"].apply(self.clean_up_text)
+        return df
+    def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
+        return ARENASSloveneAnnotator1Dataset.get_context_attributes(self, indices, columns)
+
+# ---- TOXIGEN, LGBTEn, MigrantsEn as before ----
 class ToxigenDataset(PreprocessedDataset):
     DEFAULT_CONTEXT_COLUMNS = [
         "target_group", "stereotype", "intent", "problem_group", "toxicity_annotator", "actual_method"
@@ -275,8 +441,6 @@ class ToxigenDataset(PreprocessedDataset):
                 entry.append(self.data.iloc[i][col])
             out.append(tuple(entry))
         return out
-
-from sklearn.preprocessing import LabelEncoder
 
 class LGBTEnDataset(PreprocessedDataset):
     def __init__(

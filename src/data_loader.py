@@ -8,6 +8,12 @@ from preprocessing import (
     FullFrenchTweetDataset, 
     ARENASFrenchAnnotator1Dataset, 
     ARENASFrenchAnnotator2Dataset,
+    ARENASGermanAnnotator1Dataset,
+    ARENASGermanAnnotator2Dataset,
+    ARENASCypriotAnnotator1Dataset,
+    ARENASCypriotAnnotator2Dataset,
+    ARENASSloveneAnnotator1Dataset,
+    ARENASSloveneAnnotator2Dataset,
     ToxigenDataset,
     LGBTEnDataset,
     MigrantsEnDataset,
@@ -41,6 +47,18 @@ def load_data(dataset_name="graph", csv_path=None, experiment_nb=1):
         return ARENASFrenchAnnotator1Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
     elif dataset_name == "arenasfrenchannotator2":
         return ARENASFrenchAnnotator2Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
+    elif dataset_name == "arenasgermanannotator1":
+        return ARENASGermanAnnotator1Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
+    elif dataset_name == "arenasgermanannotator2":
+        return ARENASGermanAnnotator2Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
+    elif dataset_name == "arenascypriotannotator1":
+        return ARENASCypriotAnnotator1Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
+    elif dataset_name == "arenascypriotannotator2":
+        return ARENASCypriotAnnotator2Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
+    elif dataset_name == "arenassloveneannotator1":
+        return ARENASSloveneAnnotator1Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
+    elif dataset_name == "arenassloveneannotator2":
+        return ARENASSloveneAnnotator2Dataset(experiment_nb=experiment_nb, skip_embeddings=True)
     elif dataset_name == "toxigen":
         return ToxigenDataset(experiment_nb=experiment_nb, csv_path=csv_path, skip_embeddings=True)
     elif dataset_name == "lgbten":
@@ -50,6 +68,7 @@ def load_data(dataset_name="graph", csv_path=None, experiment_nb=1):
     else:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
+# The below class is kept for legacy/simple usage; usually you should use the main class in preprocessing.py
 class SchemaA1Dataset:
     """
     Lightweight CSV-based SchemaA1Dataset for legacy/simple usage.
