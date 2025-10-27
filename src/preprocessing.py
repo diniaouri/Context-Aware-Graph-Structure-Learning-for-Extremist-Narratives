@@ -17,7 +17,8 @@ class PreprocessedDataset(ABC):
 
         # self.data is set by subclasses BEFORE this constructor is called!
         if not skip_embeddings:
-            self.calc_embeddings_if_not_already("dangvantuan/french-document-embedding")
+            #self.calc_embeddings_if_not_already("dangvantuan/french-document-embedding")         
+            self.calc_embeddings_if_not_already("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
             print("Embeddings are loaded")
             self.embeddings = torch.from_numpy(self.embeddings)
         else:
