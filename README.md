@@ -322,6 +322,21 @@ python src/main.py -exp_nb <N> --context_mode --context_columns <COLUMN_1> <COLU
 - `--context_mode`: Activates context regularization.
 - `--context_columns ...`: Uses the specified column(s) for context-aware learning.
 
+5. **To run node classification**
+
+```bash
+python src/node_cls_attributes2.py \
+  --cpu_only \
+  --dataset <DATASET_NAME> \
+  --label_col "<LABEL_COLUMN>" \
+  --adjacency_matrix /abs/path/to/adjacency_file.pkl \
+  --embeddings_file /abs/path/to/embeddings_file.npy \
+  --feature_cols "In-Group" "Out-group" \
+  --epochs 600 \
+  --n_splits 5 \
+  --hidden_dim 128 \
+  --num_layers 3 \
+  --n_runs 1
 ---
 
 
