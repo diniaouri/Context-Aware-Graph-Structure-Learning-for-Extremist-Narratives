@@ -323,9 +323,25 @@ python src/main.py -exp_nb <N> --context_mode --context_columns <COLUMN_1> <COLU
 - `--context_columns ...`: Uses the specified column(s) for context-aware learning.
 
 5. **To run node classification**
+```bash
+python src/node_cls.py \
+  --cpu_only \
+  --dataset <DATASET_NAME> \
+  --label_col "<LABEL_COLUMN>" \
+  --adjacency_matrix /abs/path/to/adjacency_file.pkl \
+  --embeddings_file /abs/path/to/embeddings_file.npy \
+  --epochs 600 \
+  --n_splits 5 \
+  --hidden_dim 128 \
+  --num_layers 3 \
+  --n_runs 1
+```
+
+
+6. **To run node classification with attributes**
 
 ```bash
-python src/node_cls_attributes2.py \
+python src/node_cls_attributes.py \
   --cpu_only \
   --dataset <DATASET_NAME> \
   --label_col "<LABEL_COLUMN>" \
@@ -337,6 +353,7 @@ python src/node_cls_attributes2.py \
   --hidden_dim 128 \
   --num_layers 3 \
   --n_runs 1
+```
 ---
 
 
