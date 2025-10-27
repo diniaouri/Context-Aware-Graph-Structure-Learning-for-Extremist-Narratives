@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch_geometric.nn import SAGEConv, GCNConv, BatchNorm, JumpingKnowledge
+from torch_geometric.nn import SAGEConv
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 import pickle
@@ -47,58 +47,39 @@ DATASETS = {
 }
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Downstream node classification with PyG, batchnorm, JK, no DGL")
+    parser = argparse.ArgumentParser(description="Node classification with PyG (no DGL!)")
     parser.add_argument('--dataset', type=str, required=True, choices=list(DATASETS.keys()))
     parser.add_argument('--label_col', type=str, required=True)
     parser.add_argument('--adjacency_matrix', type=str, required=True)
     parser.add_argument('--experiment_nb', type=int, default=3)
-    parser.add_argument('--embedding_col', type=str, default=None)
     parser.add_argument('--embeddings_file', type=str, default=None)
+    parser.add_argument('--feature_cols', type=str, nargs='+', required=True)
     parser.add_argument('--n_splits', type=int, default=5)
     parser.add_argument('--epochs', type=int, default=600)
-    parser.add_argument('--model', type=str, default='GraphSAGE', choices=['GCN', 'GraphSAGE'])
+    parser.add_argument('--hidden_dim', type=int, default=128)
+    parser.add_argument('--num_layers', type=int, default=3)
+    parser.add_argument('--dropout', type=float, default=0.2)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--n_runs', type=int, default=1)
-    parser.add_argument('--hidden_dim', type=int, default=32)
-    parser.add_argument('--num_layers', type=int, default=2)
-    parser.add_argument('--dropout', type=float, default=0.2)
     parser.add_argument('--cpu_only', action='store_true')
     return parser.parse_args()
 
-class GNNWithJK(nn.Module):
-    def __init__(self, in_feats, hidden_dim, num_classes, model='GraphSAGE', num_layers=2, dropout=0.2, jk_mode='cat'):
+class GraphSAGEFinetune(nn.Module):
+    def __init__(self, in_feats, hidden_dim, num_classes, num_layers=3, dropout=0.2):
         super().__init__()
-        self.model = model
-        self.num_layers = num_layers
+        self.convs = nn.ModuleList()
+        self.convs.append(SAGEConv(in_feats, hidden_dim))
+        for _ in range(num_layers - 2):
+            self.convs.append(SAGEConv(hidden_dim, hidden_dim))
+        self.convs.append(SAGEConv(hidden_dim, num_classes))
         self.dropout = dropout
 
-        if model == 'GCN':
-            conv_class = GCNConv
-        else:
-            conv_class = SAGEConv
-
-        self.convs = nn.ModuleList()
-        self.norms = nn.ModuleList()
-        self.convs.append(conv_class(in_feats, hidden_dim))
-        self.norms.append(BatchNorm(hidden_dim))
-        for _ in range(num_layers - 1):
-            self.convs.append(conv_class(hidden_dim, hidden_dim))
-            self.norms.append(BatchNorm(hidden_dim))
-
-        self.jk = JumpingKnowledge(jk_mode)
-        out_feats = hidden_dim * num_layers if jk_mode == 'cat' else hidden_dim
-        self.lin = nn.Linear(out_feats, num_classes)
-
     def forward(self, x, edge_index):
-        xs = []
-        for i in range(self.num_layers):
-            x = self.convs[i](x, edge_index)
-            x = self.norms[i](x)
+        for conv in self.convs[:-1]:
+            x = conv(x, edge_index)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
-            xs.append(x)
-        x = self.jk(xs)
-        x = self.lin(x)
+        x = self.convs[-1](x, edge_index)
         return x
 
 def main():
@@ -124,7 +105,7 @@ def main():
         # Load dataset
         dataset = DATASETS[args.dataset](experiment_nb=args.experiment_nb, embeddings_path=args.embeddings_file)
         node_features = dataset.data
-        needed_cols = [args.label_col]
+        needed_cols = args.feature_cols + [args.label_col]
         node_features = node_features.dropna(subset=needed_cols).reset_index(drop=True)
 
         # Label encoding
@@ -132,12 +113,12 @@ def main():
         label_to_num = {label: idx for idx, label in enumerate(unique_labels)}
         node_features['label'] = node_features[args.label_col].map(label_to_num)
 
-        # Remove classes with <n_splits samples
+        # Remove classes with <n_splits samples to prevent stratified split errors
         class_counts = node_features['label'].value_counts()
         keep_classes = class_counts[class_counts >= args.n_splits].index
         before_count = len(node_features)
         node_features = node_features[node_features['label'].isin(keep_classes)]
-        node_features = node_features.reset_index(drop=False)  # keep old index as column
+        node_features = node_features.reset_index(drop=False)  # keep original index as column
         after_count = len(node_features)
         if after_count < before_count:
             print(f"Warning: {before_count - after_count} samples dropped because their class had fewer than {args.n_splits} instances (n_splits={args.n_splits}).")
@@ -149,15 +130,25 @@ def main():
         remaining_idx = node_features['index'].values
         adj = adj[np.ix_(remaining_idx, remaining_idx)]
 
-        # Embeddings
+        # Compose feature matrix
+        features_list = []
         if args.embeddings_file is not None:
             sublime_embs_all = np.load(args.embeddings_file)
             sublime_embs = sublime_embs_all[node_features['index'].values]
-        else:
-            raise ValueError("You must provide --embeddings_file")
-        assert sublime_embs.shape[0] == len(node_features)
-        features = torch.tensor(sublime_embs, dtype=torch.float32).to(device)
+            assert sublime_embs.shape[0] == len(node_features), "SUBLIME embeddings count does not match nodes"
+            features_list.append(sublime_embs)
+        for col in args.feature_cols:
+            if node_features[col].dtype == object or node_features[col].dtype.name == "category":
+                onehots = pd.get_dummies(node_features[col], prefix=col)
+                features_list.append(onehots.values)
+            else:
+                arr = node_features[[col]].values.astype(np.float32)
+                features_list.append(arr)
+        features = np.concatenate(features_list, axis=1)
+        features = torch.tensor(features, dtype=torch.float32).to(device)
         labels_tensor = torch.tensor(labels, dtype=torch.long).to(device)
+        assert adj.shape[0] == len(node_features)
+        assert features.shape[0] == len(node_features)
 
         node_features = node_features.drop(columns=['index']).reset_index(drop=True)
 
@@ -167,25 +158,18 @@ def main():
 
         skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=run_seed)
         run_results = []
+
         for fold, (trainval_idx, test_idx) in enumerate(skf.split(np.zeros_like(labels), labels)):
             # 60/20/20 split: train/val/test
             train_idx, val_idx = train_test_split(
                 trainval_idx,
-                test_size=0.25,
+                test_size=0.25,  # 25% of 80% = 20% of total
                 stratify=labels[trainval_idx],
                 random_state=run_seed + fold
             )
-
             print(f"\n=== Run {run+1}/{args.n_runs}, Fold {fold + 1}/{args.n_splits} ===")
-            model = GNNWithJK(
-                in_feats=features.shape[1],
-                hidden_dim=args.hidden_dim,
-                num_classes=nb_classes,
-                model=args.model,
-                num_layers=args.num_layers,
-                dropout=args.dropout,
-                jk_mode='cat'  # try 'cat', 'max', etc.
-            ).to(device)
+
+            model = GraphSAGEFinetune(features.shape[1], args.hidden_dim, nb_classes, args.num_layers, args.dropout).to(device)
             optimizer = optim.Adam(model.parameters(), lr=0.01)
             loss_fn = nn.CrossEntropyLoss()
             train_mask = torch.zeros(features.shape[0], dtype=torch.bool, device=device)
