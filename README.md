@@ -324,6 +324,62 @@ python src/main.py -exp_nb <N> --context_mode --context_columns <COLUMN_1> <COLU
 
 ---
 
+
+
+
+
+
+## Hardware & Reproducibility
+- `--gpu` int (default: `0`): GPU index to use. If no GPU is available, the run will fall back to CPU.
+- `--ntrials` int: Number of repeated experiments for reproducibility across multiple runs.
+
+## Context Regularization
+- `--context_mode` bool: Enable contextual regularization alongside the main objective.
+- `--context_only` bool: Use only the context loss (disable contrastive loss).
+- `--use_context_adj` bool: Build the graph adjacency from context features instead of text embeddings.
+- `--context_columns` str: Comma-separated list of columns to use for context adjacency (e.g., `"Topic,In-Group,Out-group"`).
+- `--context_distance_metric` str: Distance metric for context adjacency. Options: `euclidean`, `cosine`.
+- `--context_regularization_margin` float: Margin used by the context loss.
+- `--context_regularization_weight` float: Weight (lambda) for the context loss term.
+- `--context_pair_samples` int: Number of sample pairs to draw per step/epoch for context loss.
+
+## Contrastive Learning (GCL)
+- `--temperature` float: Temperature parameter for contrastive loss.
+- `--maskfeat_rate_anchor` float: Feature masking rate for the anchor view.
+- `--maskfeat_rate_learner` float: Feature masking rate for the learner view.
+- `--nlayers` int: Number of GCL encoder layers.
+- `--hidden_dim` int: Hidden dimension size in the encoder.
+- `--rep_dim` int: Final representation (embedding) dimension.
+- `--proj_dim` int: Projector head dimension after the encoder.
+- `--dropout` float: Dropout rate inside the encoder/projector.
+- `--dropedge_rate` float: Edge dropout rate for graph augmentation.
+
+## Graph Learner & Adjacency
+- `--sparse` bool: Use sparse adjacency operations.
+- `--type_learner` str: Graph learner type. Options: `fgp`, `mlp`, `att`, `gnn`.
+- `--k` int: Number of neighbors for k-NN when building adjacency.
+- `--sim_function` str: Similarity function. Options: `cosine`, `dot`.
+- `--activation_learner` str: Activation used in the graph learner (e.g., `relu`).
+- `--gsl_mode` str: Graph structure mode. Options: `structure_refinement`, `structure_inference`.
+- `--n_neighbors` int: Number of neighbors to keep in the final adjacency.
+- `--sym` bool: Symmetrize the adjacency matrix.
+
+## Training & Optimization
+- `--epochs` int: Number of training epochs.
+- `--lr` float: Learning rate.
+- `--w_decay` float: Weight decay (L2 regularization).
+
+---
+
+
+
+
+
+
+
+
+
+
 ### **Context Columns Per Dataset**
 
 #### **ARENAS SCHEMA A1 / Annotator 1 / Annotator 2**
