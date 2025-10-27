@@ -321,8 +321,11 @@ python src/main.py -exp_nb <N> --context_mode --context_columns <COLUMN_1> <COLU
 - `-exp_nb <N>`: Selects the experiment/dataset (see experiment numbers above).
 - `--context_mode`: Activates context regularization.
 - `--context_columns ...`: Uses the specified column(s) for context-aware learning.
+  
+5. **To run node classification:**
 
-5. **To run node classification**
+Use a single command; add `--feature_cols` if you want to include attribute columns.
+
 ```bash
 python src/node_cls.py \
   --cpu_only \
@@ -330,6 +333,7 @@ python src/node_cls.py \
   --label_col "<LABEL_COLUMN>" \
   --adjacency_matrix /abs/path/to/adjacency_file.pkl \
   --embeddings_file /abs/path/to/embeddings_file.npy \
+  [--feature_cols "In-Group" "Out-group"] \
   --epochs 600 \
   --n_splits 5 \
   --hidden_dim 128 \
@@ -338,24 +342,9 @@ python src/node_cls.py \
 ```
 
 
-6. **To run node classification with attributes**
-
-```bash
-python src/node_cls_attributes.py \
-  --cpu_only \
-  --dataset <DATASET_NAME> \
-  --label_col "<LABEL_COLUMN>" \
-  --adjacency_matrix /abs/path/to/adjacency_file.pkl \
-  --embeddings_file /abs/path/to/embeddings_file.npy \
-  --feature_cols "In-Group" "Out-group" \
-  --epochs 600 \
-  --n_splits 5 \
-  --hidden_dim 128 \
-  --num_layers 3 \
-  --n_runs 1
-```
----
-
+Notes
+- Include `--feature_cols` to add one or more attribute columns; each column is a separate quoted argument.
+- Quote arguments that contain spaces (e.g., `"Perceived Threat"`, `"In-Group"`).
 
 
 
