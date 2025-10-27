@@ -25,40 +25,40 @@ from graph_learners import FGP_learner, ATT_learner, GNN_learner, MLP_learner
 import dgl
 import os
 import random
+import pandas as pd
 from utils import save_loss_plot, ExperimentParameters, accuracy, get_feat_mask, symmetrize, normalize, split_batch, torch_sparse_eye, torch_sparse_to_dgl_graph, dgl_graph_to_torch_sparse
 
 from sklearn.neighbors import kneighbors_graph
-
-EOS = 1e-10
+import matplotlib.pyplot as plt
 
 def sanitize_filename_part(s):
-    # Replace any characters that could break filenames, especially slashes
     return str(s).replace("/", "_").replace("\\", "_").replace(" ", "_")
 
 def build_run_suffix(args, max_parts=4):
-    """
-    Create a unique suffix for the run based on key arguments.
-    Limits the length to avoid OS filename errors.
-    max_parts: How many argument groups to include (exp_nb, context, context_columns, plus one more group).
-    """
     suffix = []
     suffix.append(f"exp{args.exp_nb}")
-    # Always include context_mode if set
     if getattr(args, "context_mode", False):
         suffix.append("context")
-    # Always include context_columns if set
     if getattr(args, "context_columns", None):
-        # SAFETY: Replace any unsafe characters in column names
         safe_columns = [sanitize_filename_part(col) for col in args.context_columns]
         suffix.append("ctxcols_" + "_".join(sorted(safe_columns)))
-    # Only include up to max_parts total groups (after exp_nb/context/context_columns)
-    included = 3 # already included exp_nb, context_mode, context_columns
+    included = 3
     for arg in vars(args):
         if arg not in ["exp_nb", "context_mode", "context_columns", "embeddings_path"] and getattr(args, arg) is not None:
             if included < max_parts:
                 suffix.append(f"{sanitize_filename_part(arg)}_{sanitize_filename_part(getattr(args, arg))}")
                 included += 1
     return "__".join(suffix)
+
+def make_context_adjacency(context_data, context_columns):
+    N = context_data.shape[0]
+    adj_context = np.zeros((N, N), dtype=np.float32)
+    for i in range(N):
+        for j in range(N):
+            any_shared = any(context_data.iloc[i][col] == context_data.iloc[j][col] for col in context_columns)
+            adj_context[i, j] = 1.0 if any_shared else 0.0
+    np.fill_diagonal(adj_context, 0)
+    return adj_context
 
 class Experiment:
     def __init__(self):
@@ -100,120 +100,70 @@ class Experiment:
         accu = self.per_class_accuracy(logp[mask], labels[mask])
         return accu
 
-    def loss_gcl(self, model, graph_learner, features, anchor_adj, args, context_dataset=None):
-        if getattr(args, "maskfeat_rate_anchor", None):
-            mask_v1, _ = get_feat_mask(features, args.maskfeat_rate_anchor)
-            features_v1 = features * (1 - mask_v1)
-        else:
-            features_v1 = copy.deepcopy(features)
-
+    def loss_gcl(self, model, graph_learner, features, anchor_adj, args, context_dataset=None, dynamic_context_weight=None):
+        maskfeat_rate_anchor = args.maskfeat_rate_anchor
+        maskfeat_rate_learner = args.maskfeat_rate_learner
+        mask_v1, _ = get_feat_mask(features, maskfeat_rate_anchor)
+        features_v1 = features * (1 - mask_v1)
         z1, _ = model(features_v1, anchor_adj, 'anchor')
-
-        if getattr(args, "maskfeat_rate_learner", None):
-            mask, _ = get_feat_mask(features, args.maskfeat_rate_learner)
-            features_v2 = features * (1 - mask)
-        else:
-            features_v2 = copy.deepcopy(features)
-
+        mask, _ = get_feat_mask(features, maskfeat_rate_learner)
+        features_v2 = features * (1 - mask)
         learned_adj = graph_learner(features)
-        if not getattr(args, "sparse", False):
+        if not args.sparse:
             learned_adj = symmetrize(learned_adj)
             learned_adj = learned_adj.detach()
             learned_adj = normalize(learned_adj, 'sym', args.sparse)
-
         z2, _ = model(features_v2, learned_adj, 'learner')
 
-        if context_dataset is not None and getattr(args, "context_mode", False):
-            def get_context_attributes(indices):
-                # Use all columns specified from terminal, including ones with spaces
-                return context_dataset.get_context_attributes(indices, columns=args.context_columns)
-        else:
-            def get_context_attributes(indices):
+        # Context attributes
+        def get_context_attributes(indices):
+            if context_dataset is None or not args.context_mode:
+                #print("MAIN DEBUG: context_dataset is None or context_mode is off")
+                return None
+            #print("MAIN DEBUG: dataset columns:", list(context_dataset.data.columns))
+            #print("MAIN DEBUG: args.context_columns:", args.context_columns)
+            try:
+                attrs = context_dataset.get_context_attributes(indices, columns=args.context_columns)
+                #print("MAIN DEBUG: attributes example:", attrs[:10])
+                #print("MAIN DEBUG: unique tuples:", len(set(attrs)), "of", len(attrs))
+                return attrs
+            except Exception as e:
+                #print("MAIN DEBUG: Exception in get_context_attributes:", str(e))
                 return None
 
-        if getattr(args, "contrast_batch_size", None):
-            node_idxs = list(range(features.shape[0]))
-            batches = split_batch(node_idxs, args.contrast_batch_size)
-            total_loss = 0
-            total_contrast = 0
-            total_context = 0
-            for batch in batches:
-                weight = len(batch) / features.shape[0]
-                attributes = get_context_attributes(batch)
-                out = model.calc_loss(
-                    z1[batch], z2[batch], attributes=attributes,
-                    context_weight=getattr(args, "context_regularization_weight", 1.0),
-                    margin=getattr(args, "context_regularization_margin", 1.0),
-                    context_mode=getattr(args, "context_mode", False),
-                    distance_metric=getattr(args, "context_distance_metric", "euclidean")
-                )
-                batch_loss, batch_contrast, batch_context = out
-                total_loss += batch_loss * weight
-                total_contrast += batch_contrast * weight
-                total_context += batch_context * weight
-        else:
-            attributes = get_context_attributes(list(range(features.shape[0])))
-            total_loss, total_contrast, total_context = model.calc_loss(
+        attributes = get_context_attributes(list(range(features.shape[0])))
+
+        context_weight = dynamic_context_weight if dynamic_context_weight is not None else args.context_regularization_weight
+
+        if args.context_only:
+            total_loss = context_weight * GCL.calc_context_loss(
                 z1, z2, attributes=attributes,
-                context_weight=getattr(args, "context_regularization_weight", 1.0),
-                margin=getattr(args, "context_regularization_margin", 1.0),
-                context_mode=getattr(args, "context_mode", False),
-                distance_metric=getattr(args, "context_distance_metric", "euclidean")
+                margin=args.context_regularization_margin,
+                context_mode=args.context_mode,
+                distance_metric=args.context_distance_metric,
+                context_pair_samples=args.context_pair_samples
             )
-
-        return total_loss, total_contrast, total_context, learned_adj
-
-    def evaluate_adj_by_cls(self, Adj, features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, args):
-        model = GCN(in_channels=nfeats, hidden_channels=args.hidden_dim_cls, out_channels=nclasses, num_layers=args.nlayers_cls,
-                    dropout=args.dropout_cls, dropout_adj=args.dropedge_cls, Adj=Adj, sparse=args.sparse)
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.lr_cls, weight_decay=args.w_decay_cls)
-
-        bad_counter = 0
-        best_val = 0
-        best_model = None
-
-        if torch.cuda.is_available():
-            model = model.cuda()
-            train_mask = torch.tensor(train_mask).cuda()        
-            val_mask = torch.tensor(val_mask).cuda()
-            test_mask = torch.tensor(test_mask).cuda()
-            features = features.cuda()
-            labels = labels.cuda()
-
-        for epoch in range(1, args.epochs_cls + 1):
-            model.train()
-            loss, accu = self.loss_cls(model, train_mask, features, labels)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            if epoch % 10 == 0:
-                model.eval()
-                val_loss, accu = self.loss_cls(
-                    model, val_mask, features, labels)
-                if accu > best_val:
-                    bad_counter = 0
-                    best_val = accu
-                    best_model = copy.deepcopy(model)
-                else:
-                    bad_counter += 1
-
-                if bad_counter >= args.patience_cls:
-                    break
-        best_model.eval()
-        test_loss, test_accu = self.loss_cls(
-            best_model, test_mask, features, labels)
-        per_class_test_acc = self.per_class_acc_cls(
-            best_model, test_mask, features, labels)
-        return best_val, test_accu, best_model, per_class_test_acc
+            contrast_loss = torch.tensor(0.0)
+            context_loss = total_loss / context_weight if context_weight > 0 else total_loss
+        else:
+            total_loss, contrast_loss, context_loss = GCL.calc_loss(
+                z1, z2, 
+                attributes=attributes,
+                temperature=args.temperature,
+                sym=args.sym,
+                context_weight=context_weight,
+                margin=args.context_regularization_margin,
+                context_mode=args.context_mode,
+                distance_metric=args.context_distance_metric,
+                context_pair_samples=args.context_pair_samples
+            )
+        return total_loss, contrast_loss, context_loss, learned_adj
 
     def train(self, args):
-        # Only include the first 4 key argument groups (exp_nb, context, context_columns, one more)
         run_suffix = build_run_suffix(args, max_parts=4)
         context_dataset = None
 
-        # ======= DATASET SELECTION, NEW NUMBERING =======
+        # ======= DATASET SELECTION =======
         if args.exp_nb == 1:
             dataset = OldSchemaA1Dataset(args.exp_nb, embeddings_path=args.embeddings_path)
         elif args.exp_nb == 2:
@@ -265,25 +215,48 @@ class Experiment:
 
         for trial in range(getattr(args, "ntrials", 1)):
             self.setup_seed(trial)
-
-            if getattr(args, "gsl_mode", "structure_refinement") == 'structure_inference':
-                if getattr(args, "sparse", False):
-                    anchor_adj_raw = torch_sparse_eye(features.shape[0])
+            # --- Context-based adjacency matrix ---
+            use_context_adj = getattr(args, "use_context_adj", False)
+            if use_context_adj and args.context_columns is not None:
+                if isinstance(features, np.ndarray):
+                    df_context = pd.DataFrame(features, columns=[f'feat_{i}' for i in range(features.shape[1])])
+                    context_cols = []
+                    for col in args.context_columns:
+                        if isinstance(col, int):
+                            context_cols.append(f'feat_{col}')
+                        else:
+                            context_cols.append(str(col))
+                    df_context = df_context[context_cols]
                 else:
-                    anchor_adj_raw = torch.eye(features.shape[0])
-            elif getattr(args, "gsl_mode", "structure_refinement") == 'structure_refinement':
-                if getattr(args, "sparse", False):
-                    anchor_adj_raw = adj_original
-                else:
-                    anchor_adj_raw = torch.from_numpy(adj_original)
-
+                    df_context = features[args.context_columns]
+                adj_context = make_context_adjacency(df_context, df_context.columns)
+                anchor_adj_raw = torch.from_numpy(adj_context.astype(np.float32)).float()
+            else:
+                if getattr(args, "gsl_mode", "structure_inference") == 'structure_inference':
+                    if getattr(args, "sparse", False):
+                        anchor_adj_raw = torch_sparse_eye(features.shape[0])
+                    else:
+                        anchor_adj_raw = torch.eye(features.shape[0]).float()
+                elif getattr(args, "gsl_mode", "structure_refinement") == 'structure_refinement':
+                    if getattr(args, "sparse", False):
+                        anchor_adj_raw = adj_original
+                    else:
+                        if isinstance(adj_original, list):
+                            adj_original = np.array(adj_original)
+                        if isinstance(adj_original, np.ndarray):
+                            if adj_original.ndim == 1 or adj_original.shape[0] == 0:
+                                adj_original = np.eye(features.shape[0], dtype=np.float32)
+                            elif adj_original.ndim == 0:
+                                raise ValueError("adj_original is scalar, not adjacency matrix!")
+                            elif adj_original.ndim == 2:
+                                adj_original = adj_original.astype(np.float32)
+                        print("adj_original shape:", adj_original.shape)
+                        anchor_adj_raw = torch.from_numpy(adj_original).float()
             anchor_adj = normalize(anchor_adj_raw, 'sym', getattr(args, "sparse", False))
-
             if getattr(args, "sparse", False):
                 anchor_adj_torch_sparse = copy.deepcopy(anchor_adj)
                 anchor_adj = torch_sparse_to_dgl_graph(anchor_adj)
-
-            type_learner = getattr(args, "type_learner", None)
+            type_learner = args.type_learner
             if type_learner == 'fgp':
                 graph_learner = FGP_learner(
                     features.cpu(), args.k, args.sim_function, 6, args.sparse)
@@ -297,17 +270,14 @@ class Experiment:
                 graph_learner = GNN_learner(2, features.shape[1], args.k, args.sim_function, 6, args.sparse,
                                             args.activation_learner, anchor_adj)
             else:
-                raise ValueError(f"Unknown type_learner: {type_learner}. Please check your configuration or command-line arguments. Must be one of: 'fgp', 'mlp', 'att', 'gnn'.")
-
+                raise ValueError(f"Unknown type_learner: {type_learner}.")
             model = GCL(nlayers=args.nlayers, in_dim=nfeats, hidden_dim=args.hidden_dim,
                         emb_dim=args.rep_dim, proj_dim=args.proj_dim,
                         dropout=args.dropout, dropout_adj=args.dropedge_rate, sparse=args.sparse)
-
             optimizer_cl = torch.optim.Adam(
                 model.parameters(), lr=args.lr, weight_decay=args.w_decay)
             optimizer_learner = torch.optim.Adam(
                 graph_learner.parameters(), lr=args.lr, weight_decay=args.w_decay)
-
             if torch.cuda.is_available():
                 model = model.cuda()
                 graph_learner = graph_learner.cuda()
@@ -316,47 +286,50 @@ class Experiment:
                 test_mask = torch.tensor(test_mask).cuda()
                 features = features.cuda()
                 labels = torch.tensor(labels).cuda()
-                if not getattr(args, "sparse", False):
+                if not args.sparse:
                     anchor_adj = anchor_adj.cuda()
-
             loss_list = []
+            contrastive_loss_list = []
+            context_loss_list = []
+
+            start_weight = 0.0
+            max_weight = args.context_regularization_weight
+            rampup_epochs = int(args.epochs * 0.6)
 
             for epoch in range(1, args.epochs + 1):
+                if args.context_mode and not args.context_only:
+                    if epoch < rampup_epochs:
+                        dynamic_context_weight = start_weight + (max_weight - start_weight) * (epoch / rampup_epochs)
+                    else:
+                        dynamic_context_weight = max_weight
+                elif args.context_only:
+                    dynamic_context_weight = max_weight
+                else:
+                    dynamic_context_weight = 0.0
 
                 model.train()
                 graph_learner.train()
-
                 total_loss, contrast_loss, context_loss, Adj = self.loss_gcl(
-                    model, graph_learner, features, anchor_adj, args, context_dataset=context_dataset
+                    model, graph_learner, features, anchor_adj, args, context_dataset=context_dataset,
+                    dynamic_context_weight=dynamic_context_weight
                 )
-
                 optimizer_cl.zero_grad()
                 optimizer_learner.zero_grad()
                 total_loss.backward()
                 optimizer_cl.step()
                 optimizer_learner.step()
 
-                # Structure Bootstrapping
-                if (1 - getattr(args, "tau", 0)) and (getattr(args, "c", 0) == 0 or epoch % getattr(args, "c", 1) == 0):
-                    if getattr(args, "sparse", False):
-                        learned_adj_torch_sparse = dgl_graph_to_torch_sparse(
-                            Adj)
-                        anchor_adj_torch_sparse = anchor_adj_torch_sparse * args.tau \
-                            + learned_adj_torch_sparse * (1 - args.tau)
-                        anchor_adj = torch_sparse_to_dgl_graph(
-                            anchor_adj_torch_sparse)
-                    else:
-                        anchor_adj = anchor_adj * args.tau + Adj.detach() * (1 - args.tau)
-
-                print(f"Epoch {epoch:05d} | Contrastive: {contrast_loss:.4f} | Context: {context_loss:.4f} | Total: {total_loss:.4f}")
                 loss_list.append(total_loss.item())
+                contrastive_loss_list.append(contrast_loss.item())
+                context_loss_list.append(context_loss.item())
+
+                print(f"Epoch {epoch:05d} | Contrastive: {contrast_loss:.4f} | Context: {context_loss:.4f} | Total: {total_loss:.4f} | ContextWeight: {dynamic_context_weight:.4f}")
 
                 if epoch % 200 == 0:
                     model.eval()
                     graph_learner.eval()
                     f_adj = Adj
-
-                    if getattr(args, "sparse", False):
+                    if args.sparse:
                         f_adj.edata['w'] = f_adj.edata['w'].detach()
                     else:
                         f_adj = f_adj.detach()
@@ -365,57 +338,106 @@ class Experiment:
                     with open(adj_file, 'wb') as file:
                         pickle.dump(f_adj, file)
 
-            # --- Save embeddings and labels after training ---
+            epochs = np.arange(1, len(loss_list) + 1)
+            plt.figure(figsize=(10, 6))
+            plt.plot(epochs, loss_list, label="Total Loss")
+            plt.plot(epochs, contrastive_loss_list, label="Contrastive Loss")
+            plt.plot(epochs, context_loss_list, label="Context Loss")
+            plt.xlabel("Epoch")
+            plt.ylabel("Loss")
+            plt.title("Loss Evolution Over Epochs")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(f"losses_separate__{run_suffix}.png")
+            plt.close()
+
+            plt.figure(figsize=(8, 5))
+            plt.plot(epochs, loss_list)
+            plt.xlabel("Epoch")
+            plt.ylabel("Total Loss")
+            plt.title("Total Loss Over Epochs")
+            plt.tight_layout()
+            plt.savefig(f"loss_total__{run_suffix}.png")
+            plt.close()
+
+            plt.figure(figsize=(8, 5))
+            plt.plot(epochs, contrastive_loss_list)
+            plt.xlabel("Epoch")
+            plt.ylabel("Contrastive Loss")
+            plt.title("Contrastive Loss Over Epochs")
+            plt.tight_layout()
+            plt.savefig(f"loss_contrastive__{run_suffix}.png")
+            plt.close()
+
+            plt.figure(figsize=(8, 5))
+            plt.plot(epochs, context_loss_list)
+            plt.xlabel("Epoch")
+            plt.ylabel("Context Loss")
+            plt.title("Context Loss Over Epochs")
+            plt.tight_layout()
+            plt.savefig(f"loss_context__{run_suffix}.png")
+            plt.close()
+
+            np.save(f"losses_total_{run_suffix}.npy", np.array(loss_list))
+            np.save(f"losses_contrastive_{run_suffix}.npy", np.array(contrastive_loss_list))
+            np.save(f"losses_context_{run_suffix}.npy", np.array(context_loss_list))
+
             model.eval()
             with torch.no_grad():
                 embeddings, _ = model(features, anchor_adj)
                 embeddings_np = embeddings.cpu().numpy()
                 emb_file = f'./embeddings/embeddings__{run_suffix}.npy'
                 np.save(emb_file, embeddings_np)
-            # --- End of embedding saving ---
-
-            # --- Compute and save adjacency from final embeddings ---
-            # This ensures adjacency reflects the final embeddings (and thus context)
-            # You can choose n_neighbors and metric to suit your application
-            adj_final = kneighbors_graph(embeddings_np, n_neighbors=10, metric="cosine", mode='connectivity').toarray()
+            adj_final = kneighbors_graph(embeddings_np, n_neighbors=args.n_neighbors, metric="cosine", mode='connectivity').toarray()
             os.makedirs("./adjacency_matrices", exist_ok=True)
             adj_final_file = f'./adjacency_matrices/adjacency_final__{run_suffix}.pkl'
             with open(adj_final_file, 'wb') as file:
                 pickle.dump(adj_final, file)
-            # --- End adjacency saving ---
-
             save_loss_plot(loss_list, args)
 
 def parse_cli():
     parser = argparse.ArgumentParser()
     parser.add_argument('-exp_nb', type=int, required=True)
-    parser.add_argument('--gpu', type=int, default=0, help='GPU device ID (default: 0)')
-    parser.add_argument('--context_mode', action='store_true', help='Use contextual regularization loss')
-    parser.add_argument('--context_columns', nargs='+', default=None,
-                        help='List of context columns to use for regularization (can be any columns in your dataset, e.g. Topic "Intolerance" "Hostility to out-group (e.g. verbal attacks, belittlement, instillment of fear, incitement to violence)" "Irony/Humor")')
-    parser.add_argument('--embeddings_path', type=str, default=None, help='Custom embeddings file path')
-    parser.add_argument('--context_distance_metric', type=str, default='euclidean',
-        choices=['euclidean', 'cosine'],
-        help='Distance metric for context regularization loss: "euclidean" or "cosine"')
-    parser.add_argument('--context_regularization_margin', type=float, default=1.0,
-        help='Margin for context regularization loss (default: 1.0)')
-    parser.add_argument('--context_regularization_weight', type=float, default=1.0,
-        help='Weight for context regularization loss (default: 1.0)')
+    parser.add_argument('--gpu', type=int, default=0)
+    parser.add_argument('--context_mode', action='store_true')
+    parser.add_argument('--context_only', action='store_true', help='Use only contextual regularization (no contrastive loss)')
+    parser.add_argument('--use_context_adj', action='store_true', help='Use context-based adjacency matrix')
+    parser.add_argument('--context_columns', nargs='+', default=None)
+    parser.add_argument('--embeddings_path', type=str, default=None)
+    parser.add_argument('--context_distance_metric', type=str, default='euclidean', choices=['euclidean', 'cosine'])
+    parser.add_argument('--context_regularization_margin', type=float, default=0.05) #to test
+    parser.add_argument('--context_regularization_weight', type=float, default=0.1)#to test
+    parser.add_argument('--context_pair_samples', type=int, default=10000)
+    parser.add_argument('--temperature', type=float, default=0.5)
+    parser.add_argument('--maskfeat_rate_anchor', type=float, default=0.2)
+    parser.add_argument('--maskfeat_rate_learner', type=float, default=0.2)
+    parser.add_argument('--n_neighbors', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=4000)
+    parser.add_argument('--nlayers', type=int, default=2)
+    parser.add_argument('--hidden_dim', type=int, default=128)
+    parser.add_argument('--rep_dim', type=int, default=128)
+    parser.add_argument('--proj_dim', type=int, default=64)
+    parser.add_argument('--dropout', type=float, default=0.5)
+    parser.add_argument('--dropedge_rate', type=float, default=0.2)
+    parser.add_argument('--sparse', action='store_true')
+    parser.add_argument('--type_learner', type=str, default='fgp', choices=['fgp', 'mlp', 'att', 'gnn'])
+    parser.add_argument('--k', type=int, default=10)
+    parser.add_argument('--sim_function', type=str, default='cosine')
+    parser.add_argument('--activation_learner', type=str, default='relu')
+    parser.add_argument('--gsl_mode', type=str, default='structure_refinement', choices=['structure_refinement', 'structure_inference'])
+    parser.add_argument('--ntrials', type=int, default=1)
+    parser.add_argument('--lr', type=float, default=0.01)
+    parser.add_argument('--w_decay', type=float, default=5e-4)
+    parser.add_argument('--sym', action='store_true')
     return parser.parse_args()
 
 if __name__ == '__main__':
     cl_args = parse_cli()
-    # Set the GPU device before anything else that uses CUDA
     if torch.cuda.is_available():
         torch.cuda.set_device(cl_args.gpu)
     experiment_params = ExperimentParameters(cl_args.exp_nb)
-    experiment_params.context_mode = cl_args.context_mode
-    experiment_params.context_columns = cl_args.context_columns
-    experiment_params.embeddings_path = cl_args.embeddings_path
-    experiment_params.context_distance_metric = cl_args.context_distance_metric
-    experiment_params.context_regularization_margin = cl_args.context_regularization_margin
-    experiment_params.context_regularization_weight = cl_args.context_regularization_weight
-
+    for arg in vars(cl_args):
+        setattr(experiment_params, arg, getattr(cl_args, arg))
     print(experiment_params.type_learner)
     experiment = Experiment()
     experiment.train(experiment_params)
