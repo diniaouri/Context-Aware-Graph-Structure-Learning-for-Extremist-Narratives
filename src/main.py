@@ -1,9 +1,17 @@
+#!/usr/bin/env python3
+
 import argparse
 import copy
+import os
 import pickle
+import random
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import dgl
+
 from preprocessing import (
     SchemaA1Dataset,
     FullFrenchTweetDataset,
@@ -22,17 +30,18 @@ from preprocessing import (
 )
 from model import GCN, GCL
 from graph_learners import FGP_learner, ATT_learner, GNN_learner, MLP_learner
-import dgl
-import os
-import random
-import pandas as pd
-from utils import save_loss_plot, ExperimentParameters, accuracy, get_feat_mask, symmetrize, normalize, split_batch, torch_sparse_eye, torch_sparse_to_dgl_graph, dgl_graph_to_torch_sparse
+
+from utils import (
+    save_loss_plot, ExperimentParameters, accuracy, get_feat_mask, symmetrize, normalize,
+    split_batch, torch_sparse_eye, torch_sparse_to_dgl_graph, dgl_graph_to_torch_sparse
+)
 
 from sklearn.neighbors import kneighbors_graph
-import matplotlib.pyplot as plt
+
 
 def sanitize_filename_part(s):
     return str(s).replace("/", "_").replace("\\", "_").replace(" ", "_")
+
 
 def build_run_suffix(args, max_parts=4):
     suffix = []
@@ -50,15 +59,51 @@ def build_run_suffix(args, max_parts=4):
                 included += 1
     return "__".join(suffix)
 
+
 def make_context_adjacency(context_data, context_columns):
+    """
+    Build a dense context adjacency matrix from a pandas DataFrame `context_data`
+    using exact equality on the listed `context_columns`.
+    Returns numpy array shape (N, N) dtype float32.
+    """
+    if not isinstance(context_data, pd.DataFrame):
+        raise TypeError("context_data must be a pandas DataFrame")
     N = context_data.shape[0]
     adj_context = np.zeros((N, N), dtype=np.float32)
     for i in range(N):
+        row_i = context_data.iloc[i]
         for j in range(N):
-            any_shared = any(context_data.iloc[i][col] == context_data.iloc[j][col] for col in context_columns)
+            any_shared = False
+            for col in context_columns:
+                if row_i[col] == context_data.iloc[j][col]:
+                    any_shared = True
+                    break
             adj_context[i, j] = 1.0 if any_shared else 0.0
     np.fill_diagonal(adj_context, 0)
     return adj_context
+
+
+def encode_metadata(df, columns):
+    """
+    Given a pandas DataFrame `df` and a list of column names `columns`,
+    return a numpy array with encoded metadata features concatenated:
+      - numeric columns kept as-is (float32)
+      - object / categorical columns one-hot encoded via get_dummies
+    """
+    parts = []
+    for col in columns:
+        if col not in df.columns:
+            raise KeyError(f"Column '{col}' not in dataset DataFrame.")
+        ser = df[col].fillna("___MISSING___")
+        if pd.api.types.is_numeric_dtype(ser):
+            parts.append(ser.values.reshape(-1, 1).astype(np.float32))
+        else:
+            dummies = pd.get_dummies(ser, prefix=col)
+            parts.append(dummies.values.astype(np.float32))
+    if not parts:
+        return np.zeros((len(df), 0), dtype=np.float32)
+    return np.concatenate(parts, axis=1)
+
 
 class Experiment:
     def __init__(self):
@@ -89,7 +134,7 @@ class Experiment:
             correct[labels == i].float().mean() if (labels == i).any() else 0.0
             for i in range(num_classes)
         ])
-        with open("./accuracies.txt", "a") as f: 
+        with open("./accuracies.txt", "a") as f:
             line = "/".join(map(str, accuracies.cpu().numpy().flatten()))
             f.write(line + '\n')
         return accuracies
@@ -115,20 +160,14 @@ class Experiment:
             learned_adj = normalize(learned_adj, 'sym', args.sparse)
         z2, _ = model(features_v2, learned_adj, 'learner')
 
-        # Context attributes
+        # Context attributes retrieval helper
         def get_context_attributes(indices):
             if context_dataset is None or not args.context_mode:
-                #print("MAIN DEBUG: context_dataset is None or context_mode is off")
                 return None
-            #print("MAIN DEBUG: dataset columns:", list(context_dataset.data.columns))
-            #print("MAIN DEBUG: args.context_columns:", args.context_columns)
             try:
                 attrs = context_dataset.get_context_attributes(indices, columns=args.context_columns)
-                #print("MAIN DEBUG: attributes example:", attrs[:10])
-                #print("MAIN DEBUG: unique tuples:", len(set(attrs)), "of", len(attrs))
                 return attrs
-            except Exception as e:
-                #print("MAIN DEBUG: Exception in get_context_attributes:", str(e))
+            except Exception:
                 return None
 
         attributes = get_context_attributes(list(range(features.shape[0])))
@@ -147,7 +186,7 @@ class Experiment:
             context_loss = total_loss / context_weight if context_weight > 0 else total_loss
         else:
             total_loss, contrast_loss, context_loss = GCL.calc_loss(
-                z1, z2, 
+                z1, z2,
                 attributes=attributes,
                 temperature=args.temperature,
                 sym=args.sym,
@@ -157,6 +196,7 @@ class Experiment:
                 distance_metric=args.context_distance_metric,
                 context_pair_samples=args.context_pair_samples
             )
+
         return total_loss, contrast_loss, context_loss, learned_adj
 
     def train(self, args):
@@ -208,27 +248,84 @@ class Experiment:
         else:
             raise ValueError(f"Unknown experiment number: {args.exp_nb}")
 
+        # ======= GET DATASET (features, labels, masks, adjacency) =======
         if getattr(args, "gsl_mode", "structure_refinement") == 'structure_refinement':
             features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj_original = dataset.get_dataset()
-        elif getattr(args, "gsl_mode", "structure_refinement") == 'structure_inference':
+        elif getattr(args, "gsl_mode", "structure_inference") == 'structure_inference':
             features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, _ = dataset.get_dataset()
+        else:
+            features, nfeats, labels, nclasses, train_mask, val_mask, test_mask, adj_original = dataset.get_dataset()
+
+        # ======= If user provided context columns, encode metadata and optionally concatenate to features =======
+        if getattr(args, "context_columns", None):
+            # Prefer dataset.data for metadata encoding
+            if context_dataset is not None:
+                df_meta = context_dataset.data.reset_index(drop=True)
+                try:
+                    meta_feats = encode_metadata(df_meta, args.context_columns)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to encode metadata columns {args.context_columns}: {e}")
+
+                # Concatenate metadata to features (handle numpy, DataFrame, or torch tensor)
+                if isinstance(features, np.ndarray):
+                    features = np.concatenate([features.astype(np.float32), meta_feats], axis=1)
+                    nfeats = features.shape[1]
+                    os.makedirs("./embeddings", exist_ok=True)
+                    combined_path = f"./embeddings/combined_exp{args.exp_nb}.npy"
+                    np.save(combined_path, features)
+                    print(f"[INFO] Saved combined features to {combined_path} (text embeddings + metadata). New shape: {features.shape}")
+                elif isinstance(features, pd.DataFrame):
+                    df_features = features.reset_index(drop=True)
+                    meta_df = pd.DataFrame(meta_feats, index=df_features.index)
+                    df_combined = pd.concat([df_features, meta_df], axis=1)
+                    features = df_combined.values.astype(np.float32)
+                    nfeats = features.shape[1]
+                    os.makedirs("./embeddings", exist_ok=True)
+                    combined_path = f"./embeddings/combined_exp{args.exp_nb}.npy"
+                    np.save(combined_path, features)
+                    print(f"[INFO] Saved combined features to {combined_path} (DataFrame->numpy). New shape: {features.shape}")
+                else:
+                    # e.g., torch tensor
+                    try:
+                        feat_np = features.cpu().numpy()
+                        features = np.concatenate([feat_np.astype(np.float32), meta_feats], axis=1)
+                        nfeats = features.shape[1]
+                        os.makedirs("./embeddings", exist_ok=True)
+                        combined_path = f"./embeddings/combined_exp{args.exp_nb}.npy"
+                        np.save(combined_path, features)
+                        print(f"[INFO] Saved combined features to {combined_path} (tensor->numpy). New shape: {features.shape}")
+                    except Exception as e:
+                        raise RuntimeError(f"Unable to combine features with metadata: {e}")
+            else:
+                # If no dataset metadata is available, but user provided a features DataFrame with columns matching context_columns,
+                # that case is handled when building adjacency below. We do not implicitly create metadata here.
+                pass
 
         for trial in range(getattr(args, "ntrials", 1)):
             self.setup_seed(trial)
+
             # --- Context-based adjacency matrix ---
             use_context_adj = getattr(args, "use_context_adj", False)
             if use_context_adj and args.context_columns is not None:
-                if isinstance(features, np.ndarray):
-                    df_context = pd.DataFrame(features, columns=[f'feat_{i}' for i in range(features.shape[1])])
-                    context_cols = []
-                    for col in args.context_columns:
-                        if isinstance(col, int):
-                            context_cols.append(f'feat_{col}')
-                        else:
-                            context_cols.append(str(col))
-                    df_context = df_context[context_cols]
+                # Prefer dataset metadata if available
+                if context_dataset is not None:
+                    df_context = context_dataset.data.copy()
+                    missing = [c for c in args.context_columns if c not in df_context.columns]
+                    if missing:
+                        raise ValueError(f"Context columns not found in dataset: {missing}")
+                    df_context = df_context[list(args.context_columns)]
+                elif isinstance(features, pd.DataFrame):
+                    df_context = features.copy()
+                    missing = [c for c in args.context_columns if c not in df_context.columns]
+                    if missing:
+                        raise ValueError(f"Context columns not found in provided features: {missing}")
+                    df_context = df_context[list(args.context_columns)]
                 else:
-                    df_context = features[args.context_columns]
+                    raise ValueError(
+                        "Cannot build context adjacency: no dataset metadata available. "
+                        "Provide --embeddings_path pointing to a combined features .npy or avoid --use_context_adj."
+                    )
+
                 adj_context = make_context_adjacency(df_context, df_context.columns)
                 anchor_adj_raw = torch.from_numpy(adj_context.astype(np.float32)).float()
             else:
@@ -252,14 +349,17 @@ class Experiment:
                                 adj_original = adj_original.astype(np.float32)
                         print("adj_original shape:", adj_original.shape)
                         anchor_adj_raw = torch.from_numpy(adj_original).float()
+
             anchor_adj = normalize(anchor_adj_raw, 'sym', getattr(args, "sparse", False))
             if getattr(args, "sparse", False):
                 anchor_adj_torch_sparse = copy.deepcopy(anchor_adj)
                 anchor_adj = torch_sparse_to_dgl_graph(anchor_adj)
+
+            # Choose graph learner
             type_learner = args.type_learner
             if type_learner == 'fgp':
                 graph_learner = FGP_learner(
-                    features.cpu(), args.k, args.sim_function, 6, args.sparse)
+                    features if isinstance(features, torch.Tensor) else torch.tensor(features), args.k, args.sim_function, 6, args.sparse)
             elif type_learner == 'mlp':
                 graph_learner = MLP_learner(2, features.shape[1], args.k, args.sim_function, 6, args.sparse,
                                             args.activation_learner)
@@ -271,23 +371,34 @@ class Experiment:
                                             args.activation_learner, anchor_adj)
             else:
                 raise ValueError(f"Unknown type_learner: {type_learner}.")
+
             model = GCL(nlayers=args.nlayers, in_dim=nfeats, hidden_dim=args.hidden_dim,
                         emb_dim=args.rep_dim, proj_dim=args.proj_dim,
                         dropout=args.dropout, dropout_adj=args.dropedge_rate, sparse=args.sparse)
-            optimizer_cl = torch.optim.Adam(
-                model.parameters(), lr=args.lr, weight_decay=args.w_decay)
-            optimizer_learner = torch.optim.Adam(
-                graph_learner.parameters(), lr=args.lr, weight_decay=args.w_decay)
+
+            optimizer_cl = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
+            optimizer_learner = torch.optim.Adam(graph_learner.parameters(), lr=args.lr, weight_decay=args.w_decay)
+
+            # Move to GPU if available
             if torch.cuda.is_available():
                 model = model.cuda()
                 graph_learner = graph_learner.cuda()
                 train_mask = torch.tensor(train_mask).cuda()
                 val_mask = torch.tensor(val_mask).cuda()
                 test_mask = torch.tensor(test_mask).cuda()
-                features = features.cuda()
+                # features may be numpy -> convert to tensor first
+                if not isinstance(features, torch.Tensor):
+                    features = torch.tensor(features, dtype=torch.float32).cuda()
+                else:
+                    features = features.cuda()
                 labels = torch.tensor(labels).cuda()
                 if not args.sparse:
                     anchor_adj = anchor_adj.cuda()
+            else:
+                if not isinstance(features, torch.Tensor):
+                    features = torch.tensor(features, dtype=torch.float32)
+                labels = torch.tensor(labels)
+
             loss_list = []
             contrastive_loss_list = []
             context_loss_list = []
@@ -313,6 +424,7 @@ class Experiment:
                     model, graph_learner, features, anchor_adj, args, context_dataset=context_dataset,
                     dynamic_context_weight=dynamic_context_weight
                 )
+
                 optimizer_cl.zero_grad()
                 optimizer_learner.zero_grad()
                 total_loss.backward()
@@ -325,19 +437,27 @@ class Experiment:
 
                 print(f"Epoch {epoch:05d} | Contrastive: {contrast_loss:.4f} | Context: {context_loss:.4f} | Total: {total_loss:.4f} | ContextWeight: {dynamic_context_weight:.4f}")
 
-                if epoch % 200 == 0:
+                if epoch % 200 == 0 or epoch == args.epochs:
                     model.eval()
                     graph_learner.eval()
                     f_adj = Adj
-                    if args.sparse:
-                        f_adj.edata['w'] = f_adj.edata['w'].detach()
+                    # detach edge weights if sparse DGL graph
+                    if args.sparse and hasattr(f_adj, 'edata'):
+                        try:
+                            f_adj.edata['w'] = f_adj.edata['w'].detach()
+                        except Exception:
+                            pass
                     else:
-                        f_adj = f_adj.detach()
+                        try:
+                            f_adj = f_adj.detach()
+                        except Exception:
+                            pass
                     os.makedirs("./adjacency_matrices", exist_ok=True)
                     adj_file = f'./adjacency_matrices/adjacency_learned_epoch_{epoch}__{run_suffix}.pkl'
                     with open(adj_file, 'wb') as file:
                         pickle.dump(f_adj, file)
 
+            # Plot losses and save
             epochs = np.arange(1, len(loss_list) + 1)
             plt.figure(figsize=(10, 6))
             plt.plot(epochs, loss_list, label="Total Loss")
@@ -384,16 +504,26 @@ class Experiment:
 
             model.eval()
             with torch.no_grad():
+                # Use anchor_adj for final embedding extraction (consistent with anchor view)
                 embeddings, _ = model(features, anchor_adj)
-                embeddings_np = embeddings.cpu().numpy()
+                embeddings_np = embeddings.cpu().numpy() if isinstance(embeddings, torch.Tensor) else np.array(embeddings)
                 emb_file = f'./embeddings/embeddings__{run_suffix}.npy'
+                os.makedirs("./embeddings", exist_ok=True)
                 np.save(emb_file, embeddings_np)
+
+            # Build final kNN adjacency from learned embeddings
             adj_final = kneighbors_graph(embeddings_np, n_neighbors=args.n_neighbors, metric="cosine", mode='connectivity').toarray()
             os.makedirs("./adjacency_matrices", exist_ok=True)
             adj_final_file = f'./adjacency_matrices/adjacency_final__{run_suffix}.pkl'
             with open(adj_final_file, 'wb') as file:
                 pickle.dump(adj_final, file)
-            save_loss_plot(loss_list, args)
+
+            # Save loss plot via utility if available
+            try:
+                save_loss_plot(loss_list, args)
+            except Exception:
+                pass
+
 
 def parse_cli():
     parser = argparse.ArgumentParser()
@@ -405,8 +535,8 @@ def parse_cli():
     parser.add_argument('--context_columns', nargs='+', default=None)
     parser.add_argument('--embeddings_path', type=str, default=None)
     parser.add_argument('--context_distance_metric', type=str, default='euclidean', choices=['euclidean', 'cosine'])
-    parser.add_argument('--context_regularization_margin', type=float, default=0.05) #to test
-    parser.add_argument('--context_regularization_weight', type=float, default=0.1)#to test
+    parser.add_argument('--context_regularization_margin', type=float, default=0.05)
+    parser.add_argument('--context_regularization_weight', type=float, default=0.1)
     parser.add_argument('--context_pair_samples', type=int, default=10000)
     parser.add_argument('--temperature', type=float, default=0.5)
     parser.add_argument('--maskfeat_rate_anchor', type=float, default=0.2)
@@ -431,13 +561,15 @@ def parse_cli():
     parser.add_argument('--sym', action='store_true')
     return parser.parse_args()
 
+
 if __name__ == '__main__':
     cl_args = parse_cli()
     if torch.cuda.is_available():
         torch.cuda.set_device(cl_args.gpu)
+    # Load experiment params (ExperimentParameters will read local CSV via utils.py)
     experiment_params = ExperimentParameters(cl_args.exp_nb)
+    # Copy CLI args into experiment parameters object so downstream code uses them
     for arg in vars(cl_args):
         setattr(experiment_params, arg, getattr(cl_args, arg))
-    print(experiment_params.type_learner)
     experiment = Experiment()
     experiment.train(experiment_params)
