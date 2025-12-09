@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-Fixed node_cls: features are optional.
 
-Behavior changes:
-- You can omit --embeddings_file and --feature_cols. If both are omitted, the code will
-  create a simple fallback node feature: the (row-)degree of each node (shape [N,1]).
-- If you provide an embeddings file, it will be used. If you don't provide embeddings_file
-  but the dataset instance exposes `dataset.embeddings`, that will be used.
-- Categorical feature columns are one-hot encoded and concatenated to embeddings (if any).
-"""
 import argparse
 import numpy as np
 import pandas as pd
