@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+"""
+Fixed node_cls: features are optional.
+
+Behavior changes:
+- You can omit --embeddings_file and --feature_cols. If both are omitted, the code will
+  create a simple fallback node feature: the (row-)degree of each node (shape [N,1]).
+- If you provide an embeddings file, it will be used. If you don't provide embeddings_file
+  but the dataset instance exposes `dataset.embeddings`, that will be used.
+- Categorical feature columns are one-hot encoded and concatenated to embeddings (if any).
+"""
 import argparse
 import numpy as np
 import pandas as pd
@@ -9,6 +20,8 @@ from torch_geometric.nn import SAGEConv, GCNConv, BatchNorm, JumpingKnowledge
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 import pickle
+import sys
+from typing import Optional
 
 from preprocessing import (
     SchemaA1Dataset,
@@ -48,16 +61,16 @@ DATASETS = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Unified node classification with PyG (JK + BatchNorm) and optional attribute features."
+        description="Unified node classification with PyG (JK + BatchNorm). Features optional."
     )
     parser.add_argument('--dataset', type=str, required=True, choices=list(DATASETS.keys()))
     parser.add_argument('--label_col', type=str, required=True)
     parser.add_argument('--adjacency_matrix', type=str, required=True)
     parser.add_argument('--experiment_nb', type=int, default=3)
 
-    # Features
+    # Features (optional)
     parser.add_argument('--embeddings_file', type=str, default=None,
-                        help="Path to .npy embeddings. Optional if you only use --feature_cols.")
+                        help="Path to .npy embeddings. Optional if you only use --feature_cols or no features.")
     parser.add_argument('--feature_cols', type=str, nargs='*', default=None,
                         help='Optional list of attribute columns to include as features (e.g., "In-Group" "Out-group").')
 
@@ -77,34 +90,20 @@ def parse_args():
     return parser.parse_args()
 
 class GNNWithBNJK(nn.Module):
-    """
-    GCN/GraphSAGE with BatchNorm per layer and Jumping Knowledge aggregation.
-    Final linear head maps JK output to num_classes.
-    """
     def __init__(self, in_feats, hidden_dim, num_classes, model='GraphSAGE',
                  num_layers=3, dropout=0.2, jk_mode='cat'):
         super().__init__()
-        assert num_layers >= 1, "num_layers must be >= 1"
-        self.model = model
-        self.num_layers = num_layers
-        self.dropout = dropout
-
         conv_class = GCNConv if model == 'GCN' else SAGEConv
-
-        self.convs = nn.ModuleList()
-        self.norms = nn.ModuleList()
-
-        # First layer
-        self.convs.append(conv_class(in_feats, hidden_dim))
-        self.norms.append(BatchNorm(hidden_dim))
-        # Hidden layers
+        self.convs = nn.ModuleList([conv_class(in_feats, hidden_dim)])
+        self.norms = nn.ModuleList([BatchNorm(hidden_dim)])
         for _ in range(num_layers - 1):
             self.convs.append(conv_class(hidden_dim, hidden_dim))
             self.norms.append(BatchNorm(hidden_dim))
-
         self.jk = JumpingKnowledge(jk_mode)
         out_feats = hidden_dim * num_layers if jk_mode == 'cat' else hidden_dim
         self.lin = nn.Linear(out_feats, num_classes)
+        self.dropout = dropout
+        self.num_layers = num_layers
 
     def forward(self, x, edge_index):
         xs = []
@@ -115,25 +114,39 @@ class GNNWithBNJK(nn.Module):
             x = F.dropout(x, p=self.dropout, training=self.training)
             xs.append(x)
         x = self.jk(xs)
-        x = self.lin(x)  # logits
+        x = self.lin(x)
         return x
 
-def build_features(node_df, remaining_idx, embeddings_file, feature_cols):
+def build_features(
+    node_df: pd.DataFrame,
+    remaining_idx: np.ndarray,
+    embeddings_arr: Optional[np.ndarray],
+    feature_cols: Optional[list]
+) -> Optional[np.ndarray]:
     """
     Build feature matrix by concatenating:
-      - embeddings_file (optional)
+      - embeddings_arr (optional, numpy array indexed by original dataset row order)
       - one-hot or numeric columns from feature_cols (optional)
-    Returns np.ndarray [N_nodes, D]
+    Returns np.ndarray [N_nodes, D] or None if no features were provided.
     """
     feats = []
 
-    if embeddings_file is not None:
-        all_embs = np.load(embeddings_file)
-        embs = all_embs[remaining_idx]
-        feats.append(embs)
+    # embeddings_arr may be None
+    if embeddings_arr is not None:
+        # embeddings_arr can be list/Series/ndarray
+        if isinstance(embeddings_arr, list):
+            emb_arr = np.stack(embeddings_arr)
+        elif isinstance(embeddings_arr, pd.Series):
+            emb_arr = np.stack(embeddings_arr.values)
+        else:
+            emb_arr = np.asarray(embeddings_arr)
+        # pick rows corresponding to remaining_idx (these are local indices 0..N-1 when called that way)
+        feats.append(emb_arr[remaining_idx])
 
     if feature_cols:
         for col in feature_cols:
+            if col not in node_df.columns:
+                raise KeyError(f"Requested feature column '{col}' not found in node dataframe columns.")
             col_data = node_df.loc[:, col]
             if col_data.dtype == object or col_data.dtype.name == "category":
                 onehots = pd.get_dummies(col_data, prefix=col)
@@ -143,7 +156,7 @@ def build_features(node_df, remaining_idx, embeddings_file, feature_cols):
                 feats.append(arr)
 
     if not feats:
-        raise ValueError("No features provided. Supply --embeddings_file and/or --feature_cols.")
+        return None
     return np.concatenate(feats, axis=1).astype(np.float32)
 
 def main():
@@ -161,16 +174,16 @@ def main():
         if device.type == "cuda":
             torch.cuda.manual_seed_all(run_seed)
 
-        # Load adjacency matrix (pickle with numpy array or torch tensor)
+        # Load adjacency matrix
         with open(args.adjacency_matrix, 'rb') as f:
             adj_matrix = pickle.load(f)
         adj = adj_matrix.cpu().numpy() if isinstance(adj_matrix, torch.Tensor) else adj_matrix
 
-        # Load dataset
+        # Load dataset; dataset may expose dataset.embeddings
         dataset = DATASETS[args.dataset](experiment_nb=args.experiment_nb, embeddings_path=args.embeddings_file)
         df = dataset.data
 
-        # Drop rows missing required columns (label + any requested feature cols)
+        # Drop rows missing required columns (only label is required unless feature_cols provided)
         required_cols = [args.label_col] + (args.feature_cols or [])
         df = df.dropna(subset=required_cols).reset_index(drop=True)
 
@@ -191,17 +204,31 @@ def main():
         labels = df['label'].values
         nb_classes = len(np.unique(labels))
 
-        # Filter adjacency to remaining nodes
+        # Filter adjacency to remaining nodes (original indices stored in df['index'])
         remaining_idx = df['index'].values
         adj = adj[np.ix_(remaining_idx, remaining_idx)]
 
-        # Build features (embeddings optional + attributes optional)
+        # Prepare embeddings array: prefer explicit embeddings_file, else dataset.embeddings if available
+        embeddings_arr = None
+        if args.embeddings_file is not None:
+            embeddings_arr = np.load(args.embeddings_file)
+        elif hasattr(dataset, 'embeddings') and dataset.embeddings is not None:
+            embeddings_arr = dataset.embeddings
+
+        # Build features. Pass node_df with local integer index for get_dummies alignment.
+        local_node_df = df.set_index(np.arange(len(df)))
         features_np = build_features(
-            node_df=df.set_index(np.arange(len(df))),  # clean integer index for get_dummies alignment
-            remaining_idx=np.arange(len(df)),          # features built after filtering: use local indices
-            embeddings_file=args.embeddings_file,
+            node_df=local_node_df,
+            remaining_idx=np.arange(len(local_node_df)),
+            embeddings_arr=embeddings_arr,
             feature_cols=args.feature_cols
         )
+
+        # If still None (no embeddings and no feature_cols) -> fallback to simple degree feature
+        if features_np is None:
+            print("No embeddings or feature columns provided; using degree-based scalar feature as fallback.")
+            deg = adj.sum(axis=1).astype(np.float32).reshape(-1, 1)
+            features_np = deg
 
         # To tensors
         features = torch.tensor(features_np, dtype=torch.float32, device=device)
@@ -284,7 +311,7 @@ def main():
                             "best_epoch": best_epoch,
                         }
             print(f"Best Val F1_macro: {best_val_f1:.4f} at epoch {best_epoch}")
-            print(f"Test F1_macro at best epoch: {best_metrics['test_f1_macro']:.4f}")
+            print(f"Test F1_macro at best epoch: {best_metrics.get('test_f1_macro', float('nan')):.4f}")
             run_results.append(best_metrics)
 
         all_runs_results.append(run_results)
