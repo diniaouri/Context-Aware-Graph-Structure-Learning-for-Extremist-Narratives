@@ -384,7 +384,59 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
    After running this, you should have the tweet embeddings in `embeddings`, the resulting matrices in `adjacency_matrices`, and a plot of the loss in `plots`.
 
 
-4. **To run with context regularization and specific context columns, use:**
+4. **Adding Context-Based Edges**
+
+You can enhance the graph's adjacency matrix by adding **context-based edges**. These edges are formed by connecting nodes that share specified attribute values based on context columns, such as "In-group" or "Out-group."
+
+#### **How It Works:**
+- Use the `--add_attr_edges` flag to include edges derived from context attributes.
+- Specify the relevant context columns using `--context_columns`.
+- Limit the number of context-based edges per node using `--attr_edges_max`.
+
+#### **Example Command:**
+```bash
+python src/main.py -exp_nb 7 --gpu 0 \
+  --add_attr_edges \
+  --context_columns "In-Group" "Out-group" \
+  --attr_edges_max 10 \                # Maximum 10 context-based edges per node
+  --epochs 4000 \
+  --lr 0.005 --w_decay 1e-4 --nlayers 2 --hidden_dim 256 \
+  --rep_dim 256 --proj_dim 128 --dropout 0.5 --dropedge_rate 0.2
+```
+
+#### What This Does:
+- Adds **edges between nodes sharing the same "In-Group" or "Out-group" value.**
+- Limits context-based edges to **10 per node**.
+
+This provides **explicit connections based on shared context**, which can enhance performance when combined with text-based edges.
+
+---
+
+5. **Sensitivity Analysis with Sweeps**
+
+To explore the impact of different parameters on graph construction and model performance, you can perform a **sensitivity analysis sweep**. The sweep allows you to vary:
+- **`k` (text-based edges):** Controls the number of neighbors connected using embeddings.
+- **`attr_edges_max` (context-based edges):** Limits the maximum number of context-driven edges per node.
+
+#### **How to Run a Sweep:**
+Use the `--run_sweep`, `--sweep_k_list`, and `--sweep_max_list` flags to specify the parameters to evaluate.
+
+#### **Example Command:**
+```bash
+python src/main.py -exp_nb 7 --gpu 0 --run_sweep \
+  --sweep_k_list 5,10,15,25 \         # Sweep over 5, 10, 15, 25 neighbors for text-based edges
+  --sweep_max_list 0,10,50 \          # Sweep over 0, 10, 50 context-driven edges per node
+  --context_columns "In-Group" "Out-group" \
+  --add_attr_edges \
+  --sweep_epochs 400 \
+  --epochs 400 --maskfeat_rate_anchor 0.35 --maskfeat_rate_learner 0.35 \
+  --temperature 0.08 --lr 0.005 --w_decay 1e-4 \
+  --nlayers 2 --hidden_dim 256 --rep_dim 256 --proj_dim 128
+```
+
+ 
+
+6. **To run with context regularization and specific context columns, use:**
 
 ```bash
 python src/main.py -exp_nb <N> --context_mode --context_columns <COLUMN_1> <COLUMN_2> ...
@@ -393,10 +445,17 @@ python src/main.py -exp_nb <N> --context_mode --context_columns <COLUMN_1> <COLU
 - `--context_mode`: Activates context regularization.
 - `--context_columns ...`: Uses the specified column(s) for context-aware learning.
   
-5. **To run node classification:**
 
-Use a single command; add `--feature_cols` if you want to include attribute columns.
+7. **To run node classification:**
 
+You can run node classification experiments directly or in batch mode. Below are the options:
+
+---
+
+**Single Experiment Example:**
+You can run a single node classification experiment by specifying parameters like the adjacency matrix, embeddings, features, and label column.
+
+**Single Experiment Command:**
 ```bash
 python src/node_cls.py \
   --cpu_only \
@@ -411,11 +470,73 @@ python src/node_cls.py \
   --num_layers 3 \
   --n_runs 1
 ```
+---
+
+**Batch Mode: Running Multiple Node Classification Experiments**
+
+You can run multiple node classification experiments **in batch** by processing a `.csv` file (like the outputs from a sweeps experiment). The nodes can be classified for multiple targets in context simultaneously.
+
+**Batch Classification Command:**
+```bash
+nohup python src/run_node_cls_batch.py \
+  ./sweep_results_main_slovene.csv \
+  "Topic;Initiating Problem;Intolerance;Hostility to out-group (e.g. verbal attacks, belittlement, instillment of fear, incitement to violence);Polarization/Othering;Perceived Threat;Solution" \
+  ARENASSloveneAnnotator1 \
+  13 > LOG_slovene.log 2>&1 &
+```
 
 
-Notes
-- Include `--feature_cols` to add one or more attribute columns; each column is a separate quoted argument.
-- Quote arguments that contain spaces (e.g., `"Perceived Threat"`, `"In-Group"`).
+---
+
+8. **Baseline Text Classification with BERT**
+
+To compare graph-based approaches against a baseline **text classification model**, you can use the `src/bert_text_classification_features.py` script. This script performs BERT-based text classification on a dataset, optionally including additional feature columns like context attributes.
+
+**BERT Text Classification Command:**
+```bash
+nohup python src/bert_text_classification_features.py \
+  --data_path /data/ARENAS_Automatic_Extremist_Analysis/ARENAS_Automatic_Extremist_Analysis/DL_approaches/ARENAS-Context-Aware-Graph-Structure-Learning-ContextGSL-/datasets/ARENAS_FRA.csv \
+  --text_col Text \
+  --targets "Topic" "Initiating Problem" "Intolerance" "Hostility to out-group (e.g. verbal attacks, belittlement, instillment of fear, incitement to violence)" \
+            "Polarization/Othering" "Perceived Threat" "Solution" \
+  --feature_cols "In-Group" "Out-group" \
+  --epochs 5 \
+  --batch_size 16 \
+  --lr 2e-5 \
+  --max_length 128 \
+  --seeds 0 21 42 84 123 \
+  --split_ratios 0.6 0.2 0.2 \
+  --gpu 0 > bert_fr.log 2>&1 &
+```
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
