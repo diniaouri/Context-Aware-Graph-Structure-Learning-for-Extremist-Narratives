@@ -9,9 +9,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch_geometric.nn import SAGEConv, GCNConv, BatchNorm, JumpingKnowledge
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from sklearn.model_selection import StratifiedKFold, train_test_split
 import pickle
-import sys
+import random
 from typing import Optional
 
 from preprocessing import (
@@ -52,7 +51,7 @@ DATASETS = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Unified node classification with PyG (JK + BatchNorm). Features optional."
+        description="Node classification with PyG (JK + BatchNorm), fixed split, multi-seed."
     )
     parser.add_argument('--dataset', type=str, required=True, choices=list(DATASETS.keys()))
     parser.add_argument('--label_col', type=str, required=True)
@@ -60,10 +59,8 @@ def parse_args():
     parser.add_argument('--experiment_nb', type=int, default=3)
 
     # Features (optional)
-    parser.add_argument('--embeddings_file', type=str, default=None,
-                        help="Path to .npy embeddings. Optional if you only use --feature_cols or no features.")
-    parser.add_argument('--feature_cols', type=str, nargs='*', default=None,
-                        help='Optional list of attribute columns to include as features (e.g., "In-Group" "Out-group").')
+    parser.add_argument('--embeddings_file', type=str, default=None)
+    parser.add_argument('--feature_cols', type=str, nargs='*', default=None)
 
     # Model
     parser.add_argument('--model', type=str, default='GraphSAGE', choices=['GCN', 'GraphSAGE'])
@@ -73,10 +70,8 @@ def parse_args():
     parser.add_argument('--jk_mode', type=str, default='cat', choices=['cat', 'max', 'lstm', 'sum'])
 
     # Training
-    parser.add_argument('--n_splits', type=int, default=5)
     parser.add_argument('--epochs', type=int, default=600)
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--n_runs', type=int, default=1)
+    parser.add_argument('--seeds', type=int, nargs='*', default=[0, 21, 42, 84, 123])
     parser.add_argument('--cpu_only', action='store_true')
     return parser.parse_args()
 
@@ -108,232 +103,158 @@ class GNNWithBNJK(nn.Module):
         x = self.lin(x)
         return x
 
-def build_features(
-    node_df: pd.DataFrame,
-    remaining_idx: np.ndarray,
-    embeddings_arr: Optional[np.ndarray],
-    feature_cols: Optional[list]
-) -> Optional[np.ndarray]:
-    """
-    Build feature matrix by concatenating:
-      - embeddings_arr (optional, numpy array indexed by original dataset row order)
-      - one-hot or numeric columns from feature_cols (optional)
-    Returns np.ndarray [N_nodes, D] or None if no features were provided.
-    """
+def build_features(node_df: pd.DataFrame, remaining_idx: np.ndarray,
+                   embeddings_arr: Optional[np.ndarray], feature_cols: Optional[list]) -> Optional[np.ndarray]:
     feats = []
 
-    # embeddings_arr may be None
     if embeddings_arr is not None:
-        # embeddings_arr can be list/Series/ndarray
-        if isinstance(embeddings_arr, list):
-            emb_arr = np.stack(embeddings_arr)
-        elif isinstance(embeddings_arr, pd.Series):
-            emb_arr = np.stack(embeddings_arr.values)
-        else:
-            emb_arr = np.asarray(embeddings_arr)
-        # pick rows corresponding to remaining_idx (these are local indices 0..N-1 when called that way)
+        emb_arr = np.asarray(embeddings_arr)
         feats.append(emb_arr[remaining_idx])
 
     if feature_cols:
         for col in feature_cols:
-            if col not in node_df.columns:
-                raise KeyError(f"Requested feature column '{col}' not found in node dataframe columns.")
-            col_data = node_df.loc[:, col]
+            col_data = node_df[col]
             if col_data.dtype == object or col_data.dtype.name == "category":
-                onehots = pd.get_dummies(col_data, prefix=col)
-                feats.append(onehots.values.astype(np.float32))
+                feats.append(pd.get_dummies(col_data).values.astype(np.float32))
             else:
-                arr = node_df[[col]].values.astype(np.float32)
-                feats.append(arr)
+                feats.append(col_data.values.astype(np.float32).reshape(-1, 1))
 
     if not feats:
         return None
     return np.concatenate(feats, axis=1).astype(np.float32)
+
+def set_all_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def main():
     args = parse_args()
     device = torch.device("cpu" if args.cpu_only or not torch.cuda.is_available() else "cuda")
     print(f"Using device: {device}")
 
-    all_runs_results = []
-    per_run_avgs = []
+    # Load adjacency matrix
+    with open(args.adjacency_matrix, 'rb') as f:
+        adj_matrix = pickle.load(f)
+    adj = adj_matrix.cpu().numpy() if isinstance(adj_matrix, torch.Tensor) else adj_matrix
 
-    for run in range(args.n_runs):
-        run_seed = args.seed + run
-        np.random.seed(run_seed)
-        torch.manual_seed(run_seed)
-        if device.type == "cuda":
-            torch.cuda.manual_seed_all(run_seed)
+    # Load dataset
+    dataset = DATASETS[args.dataset](experiment_nb=args.experiment_nb, embeddings_path=args.embeddings_file)
+    df = dataset.data
 
-        # Load adjacency matrix
-        with open(args.adjacency_matrix, 'rb') as f:
-            adj_matrix = pickle.load(f)
-        adj = adj_matrix.cpu().numpy() if isinstance(adj_matrix, torch.Tensor) else adj_matrix
+    required_cols = [args.label_col] + (args.feature_cols or [])
+    df = df.dropna(subset=required_cols).reset_index(drop=True)
 
-        # Load dataset; dataset may expose dataset.embeddings
-        dataset = DATASETS[args.dataset](experiment_nb=args.experiment_nb, embeddings_path=args.embeddings_file)
-        df = dataset.data
+    # Encode labels
+    unique_labels = df[args.label_col].unique()
+    label_to_num = {label: idx for idx, label in enumerate(unique_labels)}
+    df['label'] = df[args.label_col].map(label_to_num)
+    labels = df['label'].values
+    nb_classes = len(np.unique(labels))
 
-        # Drop rows missing required columns (only label is required unless feature_cols provided)
-        required_cols = [args.label_col] + (args.feature_cols or [])
-        df = df.dropna(subset=required_cols).reset_index(drop=True)
+    # Filter adjacency to remaining nodes
+    remaining_idx = df.index.values
+    adj = adj[np.ix_(remaining_idx, remaining_idx)]
 
-        # Encode labels
-        unique_labels = df[args.label_col].unique()
-        label_to_num = {label: idx for idx, label in enumerate(unique_labels)}
-        df['label'] = df[args.label_col].map(label_to_num)
+    # Load features
+    embeddings_arr = None
+    if args.embeddings_file:
+        embeddings_arr = np.load(args.embeddings_file)
+    elif hasattr(dataset, 'embeddings') and dataset.embeddings is not None:
+        embeddings_arr = dataset.embeddings
 
-        # Remove classes with < n_splits samples
-        class_counts = df['label'].value_counts()
-        keep_classes = class_counts[class_counts >= args.n_splits].index
-        before = len(df)
-        df = df[df['label'].isin(keep_classes)].reset_index(drop=False)  # keep original index
-        after = len(df)
-        if after < before:
-            print(f"Warning: {before - after} samples dropped (class count < n_splits={args.n_splits}).")
+    features_np = build_features(df.set_index(np.arange(len(df))), np.arange(len(df)),
+                                 embeddings_arr, args.feature_cols)
+    if features_np is None:
+        print("No features provided; using degree-based scalar feature.")
+        features_np = adj.sum(axis=1).reshape(-1, 1).astype(np.float32)
 
-        labels = df['label'].values
-        nb_classes = len(np.unique(labels))
+    features = torch.tensor(features_np, dtype=torch.float32, device=device)
+    labels_tensor = torch.tensor(labels, dtype=torch.long, device=device)
+    src, dst = np.nonzero(adj)
+    edge_index = torch.tensor([src, dst], dtype=torch.long, device=device)
 
-        # Filter adjacency to remaining nodes (original indices stored in df['index'])
-        remaining_idx = df['index'].values
-        adj = adj[np.ix_(remaining_idx, remaining_idx)]
+    # Create **fixed train/val/test split**
+    N = features.shape[0]
+    idx = np.arange(N)
+    np.random.seed(42)  # fixed split seed
+    np.random.shuffle(idx)
+    train_idx = torch.tensor(idx[:int(0.6 * N)], dtype=torch.long)
+    val_idx   = torch.tensor(idx[int(0.6 * N):int(0.8 * N)], dtype=torch.long)
+    test_idx  = torch.tensor(idx[int(0.8 * N):], dtype=torch.long)
 
-        # Prepare embeddings array: prefer explicit embeddings_file, else dataset.embeddings if available
-        embeddings_arr = None
-        if args.embeddings_file is not None:
-            embeddings_arr = np.load(args.embeddings_file)
-        elif hasattr(dataset, 'embeddings') and dataset.embeddings is not None:
-            embeddings_arr = dataset.embeddings
+    train_mask = torch.zeros(N, dtype=torch.bool, device=device); train_mask[train_idx] = True
+    val_mask   = torch.zeros(N, dtype=torch.bool, device=device); val_mask[val_idx] = True
+    test_mask  = torch.zeros(N, dtype=torch.bool, device=device); test_mask[test_idx] = True
 
-        # Build features. Pass node_df with local integer index for get_dummies alignment.
-        local_node_df = df.set_index(np.arange(len(df)))
-        features_np = build_features(
-            node_df=local_node_df,
-            remaining_idx=np.arange(len(local_node_df)),
-            embeddings_arr=embeddings_arr,
-            feature_cols=args.feature_cols
-        )
+    all_results = []
 
-        # If still None (no embeddings and no feature_cols) -> fallback to simple degree feature
-        if features_np is None:
-            print("No embeddings or feature columns provided; using degree-based scalar feature as fallback.")
-            deg = adj.sum(axis=1).astype(np.float32).reshape(-1, 1)
-            features_np = deg
+    for run_idx, seed in enumerate(args.seeds):
+        print(f"\n=== Run {run_idx + 1}/{len(args.seeds)} | Seed={seed} ===")
+        set_all_seeds(seed)
 
-        # To tensors
-        features = torch.tensor(features_np, dtype=torch.float32, device=device)
-        labels_tensor = torch.tensor(labels, dtype=torch.long, device=device)
+        model = GNNWithBNJK(
+            in_feats=features.shape[1],
+            hidden_dim=args.hidden_dim,
+            num_classes=nb_classes,
+            model=args.model,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            jk_mode=args.jk_mode
+        ).to(device)
 
-        # Edge index from dense adjacency
-        src, dst = np.nonzero(adj)
-        edge_index = torch.tensor([src, dst], dtype=torch.long, device=device)
+        optimizer = optim.Adam(model.parameters(), lr=0.01)
+        loss_fn = nn.CrossEntropyLoss()
 
-        skf = StratifiedKFold(n_splits=args.n_splits, shuffle=True, random_state=run_seed)
-        run_results = []
+        best_val_f1 = -1
+        best_epoch = -1
+        best_metrics = {}
 
-        for fold, (trainval_idx, test_idx) in enumerate(skf.split(np.zeros_like(labels), labels)):
-            # 60/20/20 split => from the 80% trainval, keep 75% train and 25% val
-            train_idx, val_idx = train_test_split(
-                trainval_idx, test_size=0.25, stratify=labels[trainval_idx], random_state=run_seed + fold
-            )
+        for epoch in range(args.epochs):
+            model.train()
+            logits = model(features, edge_index)
+            loss = loss_fn(logits[train_mask], labels_tensor[train_mask])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-            print(f"\n=== Run {run+1}/{args.n_runs}, Fold {fold + 1}/{args.n_splits} ===")
-            model = GNNWithBNJK(
-                in_feats=features.shape[1],
-                hidden_dim=args.hidden_dim,
-                num_classes=nb_classes,
-                model=args.model,
-                num_layers=args.num_layers,
-                dropout=args.dropout,
-                jk_mode=args.jk_mode
-            ).to(device)
-            optimizer = optim.Adam(model.parameters(), lr=0.01)
-            loss_fn = nn.CrossEntropyLoss()
+            # Validation
+            model.eval()
+            with torch.no_grad():
+                pred = logits.argmax(dim=1)
+                val_pred = pred[val_mask].cpu().numpy()
+                val_true = labels_tensor[val_mask].cpu().numpy()
+                val_f1 = f1_score(val_true, val_pred, average="macro")
+                if val_f1 > best_val_f1:
+                    best_val_f1 = val_f1
+                    best_epoch = epoch
+                    # Test metrics at best val epoch
+                    test_pred = pred[test_mask].cpu().numpy()
+                    test_true = labels_tensor[test_mask].cpu().numpy()
+                    best_metrics = {
+                        "test_accuracy": accuracy_score(test_true, test_pred),
+                        "test_f1_macro": f1_score(test_true, test_pred, average="macro"),
+                        "test_f1_micro": f1_score(test_true, test_pred, average="micro"),
+                        "test_precision_macro": precision_score(test_true, test_pred, average="macro", zero_division=0),
+                        "test_recall_macro": recall_score(test_true, test_pred, average="macro", zero_division=0),
+                        "val_f1_macro": best_val_f1,
+                        "best_epoch": best_epoch,
+                        "final_loss": float(loss.item())
+                    }
 
-            # Masks
-            N = features.shape[0]
-            train_mask = torch.zeros(N, dtype=torch.bool, device=device); train_mask[train_idx] = True
-            val_mask   = torch.zeros(N, dtype=torch.bool, device=device); val_mask[val_idx]   = True
-            test_mask  = torch.zeros(N, dtype=torch.bool, device=device); test_mask[test_idx]  = True
+        print(f"Best Val F1_macro: {best_val_f1:.4f} at epoch {best_epoch}")
+        print(f"Test F1_macro at best epoch: {best_metrics['test_f1_macro']:.4f}")
+        all_results.append(best_metrics)
 
-            best_val_f1 = -1
-            best_epoch = -1
-            best_metrics = {}
-
-            for epoch in range(args.epochs):
-                model.train()
-                logits = model(features, edge_index)
-                loss = loss_fn(logits[train_mask], labels_tensor[train_mask])
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                # Validation
-                model.eval()
-                with torch.no_grad():
-                    logits = model(features, edge_index)
-                    pred = logits.argmax(dim=1)
-                    val_pred = pred[val_mask].cpu().numpy()
-                    val_true = labels_tensor[val_mask].cpu().numpy()
-                    val_f1 = f1_score(val_true, val_pred, average="macro")
-                    if val_f1 > best_val_f1:
-                        best_val_f1 = val_f1
-                        best_epoch = epoch
-                        # Evaluate test at best val epoch
-                        test_pred = pred[test_mask].cpu().numpy()
-                        test_true = labels_tensor[test_mask].cpu().numpy()
-                        acc = accuracy_score(test_true, test_pred)
-                        f1_macro = f1_score(test_true, test_pred, average="macro")
-                        f1_micro = f1_score(test_true, test_pred, average="micro")
-                        precision_macro = precision_score(test_true, test_pred, average="macro", zero_division=0)
-                        recall_macro = recall_score(test_true, test_pred, average="macro", zero_division=0)
-                        precision_micro = precision_score(test_true, test_pred, average="micro", zero_division=0)
-                        recall_micro = recall_score(test_true, test_pred, average="micro", zero_division=0)
-                        best_metrics = {
-                            "test_accuracy": acc,
-                            "test_f1_macro": f1_macro,
-                            "test_f1_micro": f1_micro,
-                            "test_precision_macro": precision_macro,
-                            "test_recall_macro": recall_macro,
-                            "test_precision_micro": precision_micro,
-                            "test_recall_micro": recall_micro,
-                            "val_f1_macro": best_val_f1,
-                            "best_epoch": best_epoch,
-                        }
-            print(f"Best Val F1_macro: {best_val_f1:.4f} at epoch {best_epoch}")
-            print(f"Test F1_macro at best epoch: {best_metrics.get('test_f1_macro', float('nan')):.4f}")
-            run_results.append(best_metrics)
-
-        all_runs_results.append(run_results)
-
-        # Per-run averages
-        metrics = list(run_results[0].keys())
-        run_avg = {m: np.mean([fold_res[m] for fold_res in run_results]) for m in metrics}
-        per_run_avgs.append(run_avg)
-        print(f"\n=== Average for Run {run+1}/{args.n_runs} ===")
-        for m in metrics:
-            vals = [fold_res[m] for fold_res in run_results]
-            print(f"  {m}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
-
-    # Aggregate across all runs and folds
-    metrics = list(all_runs_results[0][0].keys())
-    all_metrics = {m: [] for m in metrics}
-    for run_results in all_runs_results:
-        for fold_res in run_results:
-            for m in metrics:
-                all_metrics[m].append(fold_res[m])
-
-    print("\n=== Overall Results Across All Runs and Folds ===")
+    # Aggregate results over seeds
+    metrics = list(all_results[0].keys())
+    print("\n=== Summary Across Seeds ===")
     for m in metrics:
-        avg = np.mean(all_metrics[m]); std = np.std(all_metrics[m])
-        print(f"{m}: {avg:.4f} ± {std:.4f}")
-
-    print(f"\n=== Average of the average of the {args.n_runs} runs ===")
-    for m in metrics:
-        per_run_metric_avgs = [run_avg[m] for run_avg in per_run_avgs]
-        avg = np.mean(per_run_metric_avgs); std = np.std(per_run_metric_avgs)
-        print(f"{m}: {avg:.4f} ± {std:.4f}")
+        vals = [r[m] for r in all_results]
+        print(f"{m}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
 if __name__ == "__main__":
     main()
+

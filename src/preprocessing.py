@@ -415,7 +415,7 @@ class ARENASSloveneAnnotator2Dataset(PreprocessedDataset):
 # ---- TOXIGEN, LGBTEn, MigrantsEn as before ----
 class ToxigenDataset(PreprocessedDataset):
     DEFAULT_CONTEXT_COLUMNS = [
-        "target_group", "stereotype", "intent", "problem_group", "toxicity_annotator", "actual_method"
+        "In-Group", "Out-group"
     ]
     def __init__(self, experiment_nb: int = 1, csv_path: Optional[str] = None, embeddings_path: Optional[str] = None, skip_embeddings: bool = False) -> None:
         self.dataset_name = "Toxigen"
@@ -443,6 +443,42 @@ class ToxigenDataset(PreprocessedDataset):
             out.append(tuple(entry))
         return out
 
+#class LGBTEnDataset(PreprocessedDataset):
+#    def __init__(
+#        self,
+#        experiment_nb: int = 1,
+#        embeddings_path: Optional[str] = None,
+#        skip_embeddings: bool = False,
+#        csv_path: Optional[str] = None
+#    ):
+#        self.dataset_name = "LGBTEn"
+#        self.csv_path = csv_path or "datasets/LGBTEn.csv"
+#        self.label_col = "annotation_type"
+#        self.context_cols = [
+#            "title", "post", "url", "source", "timestamp", "user_name", "user_id",
+#            "comment_url", "comment_timestamp", "annotation_type", "annotation_target", "annotation_annotator"
+#        ]
+#        self.data = self.clean_up_dataset()
+#        super().__init__(experiment_nb=experiment_nb, embeddings_path=embeddings_path, skip_embeddings=skip_embeddings)
+#
+#    def clean_up_dataset(self) -> pd.DataFrame:
+#        df = pd.read_csv(self.csv_path)
+#        if "post" in df.columns:
+#            df["post"] = df["post"].apply(self.clean_up_text)
+#        if "title" in df.columns:
+#            df["title"] = df["title"].apply(self.clean_up_text)
+#        if self.label_col in df.columns:
+#            labels_raw = df[self.label_col].tolist()
+#            if any(isinstance(lbl, str) for lbl in labels_raw):
+#                encoder = LabelEncoder()
+#                self.labels = encoder.fit_transform(labels_raw)
+#                self.label_encoder = encoder
+#            else:
+#                self.labels = labels_raw
+#        else:
+#            self.labels = []
+#        return df
+        
 class LGBTEnDataset(PreprocessedDataset):
     def __init__(
         self,
@@ -455,18 +491,18 @@ class LGBTEnDataset(PreprocessedDataset):
         self.csv_path = csv_path or "datasets/LGBTEn.csv"
         self.label_col = "annotation_type"
         self.context_cols = [
-            "title", "post", "url", "source", "timestamp", "user_name", "user_id",
-            "comment_url", "comment_timestamp", "annotation_type", "annotation_target", "annotation_annotator"
+            "In-Group", "Out-group"
         ]
         self.data = self.clean_up_dataset()
         super().__init__(experiment_nb=experiment_nb, embeddings_path=embeddings_path, skip_embeddings=skip_embeddings)
 
     def clean_up_dataset(self) -> pd.DataFrame:
         df = pd.read_csv(self.csv_path)
-        if "post" in df.columns:
-            df["post"] = df["post"].apply(self.clean_up_text)
-        if "title" in df.columns:
-            df["title"] = df["title"].apply(self.clean_up_text)
+        # Drop rows with missing text or context columns
+        #required_cols = ["text"] + self.context_cols
+        #df = df.dropna(subset=[col for col in required_cols if col in df.columns])
+        if "text" in df.columns:
+            df["text"] = df["text"].apply(self.clean_up_text)
         if self.label_col in df.columns:
             labels_raw = df[self.label_col].tolist()
             if any(isinstance(lbl, str) for lbl in labels_raw):
@@ -477,7 +513,7 @@ class LGBTEnDataset(PreprocessedDataset):
                 self.labels = labels_raw
         else:
             self.labels = []
-        return df
+        return df 
 
     def get_context_attributes(self, indices: List[int], columns: Optional[List[str]] = None):
         columns = columns or self.context_cols
@@ -491,7 +527,7 @@ class LGBTEnDataset(PreprocessedDataset):
                 entry.append(self.data.iloc[i][col])
             out.append(tuple(entry))
         return out
-
+                
 class MigrantsEnDataset(PreprocessedDataset):
     def __init__(
         self,
@@ -504,18 +540,18 @@ class MigrantsEnDataset(PreprocessedDataset):
         self.csv_path = csv_path or "datasets/MigrantsEn.csv"
         self.label_col = "annotation_type"
         self.context_cols = [
-            "title", "post", "url", "source", "timestamp", "user_name", "user_id",
-            "comment_url", "comment_timestamp", "annotation_type", "annotation_target", "annotation_annotator"
+            "In-Group", "Out-group"
         ]
         self.data = self.clean_up_dataset()
         super().__init__(experiment_nb=experiment_nb, embeddings_path=embeddings_path, skip_embeddings=skip_embeddings)
 
     def clean_up_dataset(self) -> pd.DataFrame:
         df = pd.read_csv(self.csv_path)
-        if "post" in df.columns:
-            df["post"] = df["post"].apply(self.clean_up_text)
-        if "title" in df.columns:
-            df["title"] = df["title"].apply(self.clean_up_text)
+        # Drop rows with missing text or context columns
+        #required_cols = ["text"] + self.context_cols
+        #df = df.dropna(subset=[col for col in required_cols if col in df.columns])
+        if "text" in df.columns:
+            df["text"] = df["text"].apply(self.clean_up_text)
         if self.label_col in df.columns:
             labels_raw = df[self.label_col].tolist()
             if any(isinstance(lbl, str) for lbl in labels_raw):
@@ -540,3 +576,30 @@ class MigrantsEnDataset(PreprocessedDataset):
                 entry.append(self.data.iloc[i][col])
             out.append(tuple(entry))
         return out
+        
+        
+        
+        
+        
+        
+        
+        
+        
+#class MigrantsEnDataset(PreprocessedDataset):
+#    def __init__(
+#        self,
+#        experiment_nb: int = 1,
+#        embeddings_path: Optional[str] = None,
+#        skip_embeddings: bool = False,
+#        csv_path: Optional[str] = None
+#    ):
+#        self.dataset_name = "MigrantsEn"
+#        self.csv_path = csv_path or "datasets/MigrantsEn.csv"
+#       self.label_col = "annotation_type"
+#        self.context_cols = [
+#            "title", "post", "url", "source", "timestamp", "user_name", "user_id",
+#            "comment_url", "comment_timestamp", "annotation_type", "annotation_target", "annotation_annotator"
+#        ]
+#        self.data = self.clean_up_dataset()
+#        super().__init__(experiment_nb=experiment_nb, embeddings_path=embeddings_path, skip_embeddings=skip_embeddings)
+
