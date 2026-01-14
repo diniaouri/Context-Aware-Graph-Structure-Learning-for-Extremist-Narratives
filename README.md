@@ -1,12 +1,11 @@
 # Context-Aware Graph Structure Learning (ContextGSL)
 
-This repository is an extension of SUBLIME for unsupervised learning of extremist narratives in social media, with **context-aware regularization** to leverage narrative features and domain knowledge for more interpretable graph embeddings.
+This project builds upon the **SUBLIME** GSL framework with custom datasets to perform tweet analysis focused on extremism and narrative features, and introduces **context-aware regularization** for improved clustering and interpretability.
 
 ![ARENAS Project EU](/images/Arenas-final-GIF.gif)
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
 - [Datasets](#datasets)
 - [Losses](#losses)
 - [Experiments](#experiments)
@@ -21,11 +20,7 @@ This repository is an extension of SUBLIME for unsupervised learning of extremis
 
 ---
 
-## Project Overview
 
-This project builds upon the **SUBLIME** GSL framework with custom datasets to perform tweet analysis focused on extremism and narrative features, and introduces **context-aware regularization** for improved clustering and interpretability.
-
----
 
 ## Datasets
 
