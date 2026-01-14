@@ -60,6 +60,36 @@ Below are the main datasets used in this project, with both their description an
    - **Description:** English-language dataset focusing on migrant-related posts and annotations.
    - **Filename:** `MigrantsEn.csv`
    - **Code reference:** `MigrantsEnDataset`
+   
+8. **ARENAS German Annotator 1**
+   - **Description:** 1000 German tweets annotated by the first annotator for extremism and narrative features.
+   - **Filename:** `ARENAS_DATA_GERMAN_1st_Annotator.xlsx`
+   - **Code reference:** `ARENASGermanAnnotator1Dataset`
+
+9. **ARENAS German Annotator 2**
+   - **Description:** 1000 German tweets annotated by the second annotator for extremism and narrative features.
+   - **Filename:** `ARENAS_DATA_GERMAN_2nd_Annotator.xlsx`
+   - **Code reference:** `ARENASGermanAnnotator2Dataset`
+     
+10. **ARENAS Cypriot Annotator 1**
+   - **Description:** 1000 Cypriot tweets annotated by the first annotator for extremism and narrative features.
+   - **Filename:** `ARENAS_DATA_CYPRIOT_1st_Annotator.xlsx`
+   - **Code reference:** `ARENASCypriotAnnotator1Dataset`
+
+11. **ARENAS Cypriot Annotator 2**
+   - **Description:** 1000 Cypriot tweets annotated by the second annotator for extremism and narrative features.
+   - **Filename:** `ARENAS_DATA_CYPRIOT_2nd_Annotator.xlsx`
+   - **Code reference:** `ARENASCypriotAnnotator2Dataset`
+    
+12. **ARENAS Slovene Annotator 1**
+   - **Description:** 1000 Slovene tweets annotated by the first annotator for extremism and narrative features.
+   - **Filename:** `ARENAS_DATA_SLOVENE_1st_Annotator.xlsx`
+   - **Code reference:** `ARENASSloveneAnnotator1Dataset`
+
+13. **ARENAS Slovene Annotator 2**
+   - **Description:** 1000 Slovene tweets annotated by the second annotator for extremism and narrative features.
+   - **Filename:** `ARENAS_DATA_SLOVENE_2nd_Annotator.xlsx`
+   - **Code reference:** `ARENASSloveneAnnotator2Dataset`
 
 
 
@@ -90,16 +120,16 @@ To make sure the representation (embedding) of the same node under two different
 Where $\text{sim}(\cdot, \cdot)$ is cosine similarity and $\tau$ is the temperature parameter.
 
 
-# 2. Context Regularization Loss 
+## 2. Context Regularization Loss 
 
-### **Purpose**  
+**Purpose**  
 The **context regularization loss** encourages nodes with the same context (e.g., topic, group, or category) to have similar embeddings.  
 At the same time, nodes from different contexts should be separated, but not unnecessarily far apart.
 
 ---
 
 
-### How it works 
+**How it works** 
 
 1. Compute all unique unordered pairs of nodes.
 2. For **same-context** pairs:
@@ -113,7 +143,7 @@ At the same time, nodes from different contexts should be separated, but not unn
 ---
 
 
-### **Distance Metric (Configurable)**  
+**Distance Metric (Configurable)**  
 - **Default:** Euclidean distance (L2 norm)  
 - **Optional:** Cosine distance  
   - Enable with:  
@@ -123,9 +153,9 @@ At the same time, nodes from different contexts should be separated, but not unn
 
 ---
 
-## 📐 Equations
+**📐 Equations**
 
-### - **Euclidean Distance**
+- **Euclidean Distance**
 
 **Same-context pairs:**
 
@@ -137,7 +167,7 @@ At the same time, nodes from different contexts should be separated, but not unn
 
 
 
-### - **Cosine Distance**
+- **Cosine Distance**
 
 **Same-context pairs:**
 
@@ -210,7 +240,7 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 1. **Experiment 1 — ARENAS SCHEMA A1 (All Entries)**
    - **Description:** First try of SUBLIME. Uses all entries from Schema A1 (`2024_08_SCHEMA_A1.xlsx`) with the `french-document-embedding` model. No filtering is applied.
-   - **Configuration:** Set `exp_nb` argument to `1`; typically recommended `epoch` is `1000`.
+   - **Configuration:** Set `exp_nb` argument to `1`; typically recommended `epoch` is `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 1
@@ -218,7 +248,7 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 2. **Experiment 2 — ARENAS SCHEMA A1 (Filtered Extremist Narratives)**
    - **Description:** Uses Schema A1 with the `french-document-embedding` model, filtering out nodes without both IN GROUP and OUT GROUP (i.e., only extremist narratives are kept).
-   - **Configuration:** Set `exp_nb` argument to `2`; typically recommended `epoch` is `1000`.
+   - **Configuration:** Set `exp_nb` argument to `2`; typically recommended `epoch` is `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 2
@@ -226,7 +256,7 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 3. **Experiment 3 — Full French Tweet Data**
    - **Description:** Uses the large French tweets dataset (`All_french_tweet_data.csv`) with the `french-document-embedding` model. This is a general (not specifically extremist) dataset, with similar processing logic.
-   - **Configuration:** Set `exp_nb` argument to `3`; typically recommended `epoch` is `1000`.
+   - **Configuration:** Set `exp_nb` argument to `3`; typically recommended `epoch` is `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 3
@@ -234,7 +264,7 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 4. **Experiment 4 — ARENAS French Annotator 1**
    - **Description:** Uses the first annotator's French dataset (`ARENAS_DATA_FRENCH_1st_Annotator.xlsx`) with the `french-document-embedding` model.
-   - **Configuration:** Set `exp_nb` argument to `4`; `epoch` typically `1000`.
+   - **Configuration:** Set `exp_nb` argument to `4`; `epoch` typically `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 4
@@ -242,7 +272,7 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 5. **Experiment 5 — ARENAS French Annotator 2**
    - **Description:** Uses the second annotator's French dataset (`ARENAS_DATA_FRENCH_2ND_Annotator.xlsx`) with the `french-document-embedding` model.
-   - **Configuration:** Set `exp_nb` argument to `5`; `epoch` typically `1000`.
+   - **Configuration:** Set `exp_nb` argument to `5`; `epoch` typically `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 5
@@ -250,7 +280,7 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 6. **Experiment 6 — Toxigen (English)**
    - **Description:** Uses the English `Toxigen.csv` dataset for toxicity and stereotype graph analysis.
-   - **Configuration:** Set `exp_nb` argument to `6`; typically recommended `epoch` is `1000`.
+   - **Configuration:** Set `exp_nb` argument to `6`; typically recommended `epoch` is `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 6
@@ -258,7 +288,7 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 7. **Experiment 7 — FRENK LGBTEn**
    - **Description:** Uses the English LGBT dataset (`LGBTEn.csv`).
-   - **Configuration:** Set `exp_nb` argument to `7`; typically recommended `epoch` is `1000`.
+   - **Configuration:** Set `exp_nb` argument to `7`; typically recommended `epoch` is `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 7
@@ -266,10 +296,56 @@ Below are the main experiments with updated dataset mapping, experiment numbers,
 
 8. **Experiment 8 — FRENK MigrantsEn**
    - **Description:** Uses the English Migrants dataset (`MigrantsEn.csv`).
-   - **Configuration:** Set `exp_nb` argument to `8`; typically recommended `epoch` is `1000`.
+   - **Configuration:** Set `exp_nb` argument to `8`; typically recommended `epoch` is `4000`.
    - **Execution:**  
      ```bash
      python src/main.py -exp_nb 8
+     ```
+9. **Experiment 9 — ARENAS German Annotator 1**
+   - **Description:** Uses the first annotator's German dataset (`ARENAS_DATA_GERMAN_1st_Annotator.xlsx`).
+   - **Configuration:** Set `exp_nb` argument to `9`; `epoch` typically `4000`.
+   - **Execution:**  
+     ```bash
+     python src/main.py -exp_nb 9
+     ```
+
+10. **Experiment 10 — ARENAS German Annotator 2**
+   - **Description:** Uses the second annotator's German dataset (`ARENAS_DATA_GERNAN_2nd_Annotator.xlsx`).
+   - **Configuration:** Set `exp_nb` argument to `10`; `epoch` typically `4000`.
+   - **Execution:**  
+     ```bash
+     python src/main.py -exp_nb 10
+     ```
+11. **Experiment 11 — ARENAS Cypriot Annotator 1**
+   - **Description:** Uses the first annotator's German dataset (`ARENAS_DATA_CYPRIOT_1st_Annotator.xlsx`).
+   - **Configuration:** Set `exp_nb` argument to `11`; `epoch` typically `4000`.
+   - **Execution:**  
+     ```bash
+     python src/main.py -exp_nb 9
+     ```
+
+12. **Experiment 12 — ARENAS German Annotator 2**
+   - **Description:** Uses the second annotator's Cypriot dataset (`ARENAS_DATA_CYPRIOT_2nd_Annotator.xlsx`).
+   - **Configuration:** Set `exp_nb` argument to `12`; `epoch` typically `4000`.
+   - **Execution:**  
+     ```bash
+     python src/main.py -exp_nb 12
+     ```
+
+13. **Experiment 11 — ARENAS Slovene Annotator 1**
+   - **Description:** Uses the first annotator's Slovene dataset (`ARENAS_DATA_SLOVENE_1st_Annotator.xlsx`).
+   - **Configuration:** Set `exp_nb` argument to `13`; `epoch` typically `4000`.
+   - **Execution:**  
+     ```bash
+     python src/main.py -exp_nb 13
+     ```
+
+14. **Experiment 12 — ARENAS Slovene Annotator 2**
+   - **Description:** Uses the second annotator's Slovene dataset (`ARENAS_DATA_SLOVENE_2nd_Annotator.xlsx`).
+   - **Configuration:** Set `exp_nb` argument to `12`; `epoch` typically `4000`.
+   - **Execution:**  
+     ```bash
+     python src/main.py -exp_nb 12
      ```
 
 ---
